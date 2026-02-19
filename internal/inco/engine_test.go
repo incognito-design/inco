@@ -442,3 +442,235 @@ func Second() {
 		t.Errorf("expected 2 ':=' declarations across functions, got %d\n%s", count, shadow)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Corner case tests
+// ---------------------------------------------------------------------------
+
+// Single-value `_ = foo() // @must` — promote = to :=
+func TestEngine_Must_SingleValue(t *testing.T) {
+	dir := setupDir(t, map[string]string{
+		"main.go": `package main
+
+import "fmt"
+
+func Run() {
+	_ = fmt.Errorf("boom") // @must
+}
+`,
+	})
+	e := NewEngine(dir)
+	e.Run()
+	shadow := readShadow(t, e)
+	if !strings.Contains(shadow, "__inco_err :=") {
+		t.Errorf("should promote = to :=, got:\n%s", shadow)
+	}
+	if !strings.Contains(shadow, "panic(__inco_err)") {
+		t.Errorf("should panic with error var, got:\n%s", shadow)
+	}
+}
+
+// Multiple @must in same function — first := then =
+func TestEngine_Must_SameFuncMultiple(t *testing.T) {
+	dir := setupDir(t, map[string]string{
+		"main.go": `package main
+
+import "fmt"
+
+func Run() {
+	_, _ = fmt.Println("a") // @must
+	_, _ = fmt.Println("b") // @must
+}
+`,
+	})
+	e := NewEngine(dir)
+	e.Run()
+	shadow := readShadow(t, e)
+	declCount := strings.Count(shadow, "__inco_err :=")
+	plainCount := strings.Count(shadow, "__inco_err =") // does not match ":="
+	if declCount != 1 {
+		t.Errorf("expected 1 ':=' declaration, got %d\n%s", declCount, shadow)
+	}
+	if plainCount != 1 {
+		t.Errorf("expected 1 plain '=' assignment, got %d\n%s", plainCount, shadow)
+	}
+}
+
+// Mixed @must + @ensure in same function — separate variables, both get :=
+func TestEngine_MixedMustEnsure(t *testing.T) {
+	dir := setupDir(t, map[string]string{
+		"main.go": `package main
+
+import "fmt"
+
+func Run() {
+	_, _ = fmt.Println("hello") // @must
+	m := map[string]int{"a": 1}
+	v, _ := m["a"] // @ensure
+	_ = v
+}
+`,
+	})
+	e := NewEngine(dir)
+	e.Run()
+	shadow := readShadow(t, e)
+	if !strings.Contains(shadow, "__inco_err :=") {
+		t.Errorf("should have __inco_err :=, got:\n%s", shadow)
+	}
+	if !strings.Contains(shadow, "__inco_ok :=") {
+		t.Errorf("should have __inco_ok :=, got:\n%s", shadow)
+	}
+	if !strings.Contains(shadow, "panic(__inco_err)") {
+		t.Error("should panic with __inco_err")
+	}
+	if !strings.Contains(shadow, "!__inco_ok") {
+		t.Error("should check !__inco_ok")
+	}
+}
+
+// Consecutive @must lines — no code gap between them
+func TestEngine_Must_Consecutive(t *testing.T) {
+	dir := setupDir(t, map[string]string{
+		"main.go": `package main
+
+import "fmt"
+
+func Run() {
+	_, _ = fmt.Println("a") // @must
+	_, _ = fmt.Println("b") // @must
+	fmt.Println("done")
+}
+`,
+	})
+	e := NewEngine(dir)
+	e.Run()
+	shadow := readShadow(t, e)
+	// Both error checks should be present
+	errChecks := strings.Count(shadow, "__inco_err != nil")
+	if errChecks != 2 {
+		t.Errorf("expected 2 error checks, got %d\n%s", errChecks, shadow)
+	}
+}
+
+// @ensure for type assertion
+func TestEngine_Ensure_TypeAssertion(t *testing.T) {
+	dir := setupDir(t, map[string]string{
+		"main.go": `package main
+
+import "fmt"
+
+func MustString(x any) string {
+	v, _ := x.(string) // @ensure panic("not a string")
+	return v
+}
+
+func main() {
+	fmt.Println(MustString("hello"))
+}
+`,
+	})
+	e := NewEngine(dir)
+	e.Run()
+	shadow := readShadow(t, e)
+	if !strings.Contains(shadow, "__inco_ok") {
+		t.Errorf("should replace _ with __inco_ok, got:\n%s", shadow)
+	}
+	if !strings.Contains(shadow, `panic("not a string")`) {
+		t.Errorf("should have custom panic, got:\n%s", shadow)
+	}
+}
+
+// Nested closure — @must inside inner closure gets its own scope
+func TestEngine_Must_NestedClosure(t *testing.T) {
+	dir := setupDir(t, map[string]string{
+		"main.go": `package main
+
+import "fmt"
+
+func Outer() {
+	outer := func() {
+		inner := func() {
+			_, _ = fmt.Println("nested") // @must
+		}
+		inner()
+	}
+	outer()
+}
+`,
+	})
+	e := NewEngine(dir)
+	e.Run()
+	shadow := readShadow(t, e)
+	if !strings.Contains(shadow, "__inco_err :=") {
+		t.Errorf("nested closure should get :=, got:\n%s", shadow)
+	}
+}
+
+// Variable name containing underscore — replaceLastBlank must not touch it
+func TestEngine_Must_UnderscoreInVarName(t *testing.T) {
+	dir := setupDir(t, map[string]string{
+		"main.go": `package main
+
+import "fmt"
+
+func Run() {
+	my_result, _ := fmt.Println("hi") // @must
+	_ = my_result
+}
+`,
+	})
+	e := NewEngine(dir)
+	e.Run()
+	shadow := readShadow(t, e)
+	if !strings.Contains(shadow, "my_result") {
+		t.Errorf("should preserve my_result, got:\n%s", shadow)
+	}
+	if strings.Contains(shadow, "my__inco_err") {
+		t.Errorf("should not replace _ inside identifier, got:\n%s", shadow)
+	}
+}
+
+// @must/@ensure comment on struct field — must NOT be processed
+func TestEngine_DirectiveOnStructField_Ignored(t *testing.T) {
+	dir := setupDir(t, map[string]string{
+		"main.go": `package main
+
+type Config struct {
+	Name string // @must not be empty
+	Port int    // @ensure positive
+}
+
+func main() {}
+`,
+	})
+	e := NewEngine(dir)
+	e.Run()
+	if len(e.Overlay.Replace) != 0 {
+		t.Errorf("struct field comments should not trigger overlay, got %d entries", len(e.Overlay.Replace))
+	}
+}
+
+// @must where original code already uses := — should not double-colon
+func TestEngine_Must_AlreadyShortDecl(t *testing.T) {
+	dir := setupDir(t, map[string]string{
+		"main.go": `package main
+
+import "fmt"
+
+func Run() {
+	result, _ := fmt.Println("hello") // @must
+	fmt.Println(result)
+}
+`,
+	})
+	e := NewEngine(dir)
+	e.Run()
+	shadow := readShadow(t, e)
+	// Should have exactly one := and it must not be :=:= or similar
+	if strings.Contains(shadow, ":=:=") || strings.Contains(shadow, "::=") {
+		t.Errorf("double declaration operator, got:\n%s", shadow)
+	}
+	if !strings.Contains(shadow, "__inco_err") {
+		t.Errorf("should contain __inco_err, got:\n%s", shadow)
+	}
+}

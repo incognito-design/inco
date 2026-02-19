@@ -39,3 +39,51 @@ func LookupKey(m map[string]int, key string) int {
 	v, _ := m[key] // @ensure panic("key not found: " + key)
 	return v
 }
+
+// --- Case 5: @ensure for type assertion ---
+
+func MustString(x any) string {
+	v, _ := x.(string) // @ensure panic("not a string")
+	return v
+}
+
+// --- Case 6: Same-function multiple @must (`:=` then `=`) ---
+
+func MultiMust(db *DB) {
+	u1, _ := db.Query("q1") // @must
+	u2, _ := db.Query("q2") // @must
+	fmt.Println(u1, u2)
+}
+
+// --- Case 7: Mixed @must + @ensure in same function ---
+
+func MixedDirectives(db *DB, m map[string]int) {
+	user, _ := db.Query("q") // @must
+	count, _ := m[user.Name] // @ensure panic("user not in map")
+	fmt.Println(count)
+}
+
+// --- Case 8: Nested closure with @must ---
+
+func NestedClosure(db *DB) {
+	outer := func() {
+		inner := func() {
+			_, _ = db.Query("nested") // @must
+		}
+		inner()
+	}
+	outer()
+}
+
+// --- Case 9: Single-value @must (`_ = foo()` pattern) ---
+
+func SingleValueMust() {
+	_ = fmt.Errorf("test %d", 42) // @must
+}
+
+// --- Case 10: Variable name with underscore — must not be replaced ---
+
+func UnderscoreInName(db *DB) {
+	my_user, _ := db.Query("q") // @must
+	fmt.Println(my_user)
+}

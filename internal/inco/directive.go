@@ -113,7 +113,9 @@ func ParseDirective(comment string) *Directive {
 		if rest == "" {
 			return d // bare → default panic
 		}
-		parsePanicAction(d, rest)
+		if !parsePanicAction(d, rest) {
+			return nil // trailing text is not a valid action
+		}
 	}
 
 	return d
@@ -156,13 +158,13 @@ func parseTrailingPanic(d *Directive, rest string) string {
 
 // parsePanicAction attempts to parse "panic" (and optional parenthesised
 // arguments) from the front of rest.  Used for @must / @ensure.
-func parsePanicAction(d *Directive, rest string) {
+func parsePanicAction(d *Directive, rest string) bool {
 	if !strings.HasPrefix(rest, "panic") {
-		return
+		return false
 	}
 	after := rest[len("panic"):]
 	if len(after) > 0 && after[0] != ' ' && after[0] != '\t' && after[0] != '(' {
-		return
+		return false
 	}
 	d.Action = ActionPanic
 	after = strings.TrimSpace(after)
@@ -172,6 +174,7 @@ func parsePanicAction(d *Directive, rest string) {
 			d.ActionArgs = args
 		}
 	}
+	return true
 }
 
 // ---------------------------------------------------------------------------
