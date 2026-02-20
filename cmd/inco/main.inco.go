@@ -5,7 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
-	inco "github.com/incognito-design/inco-go/internal/inco"
+	inco "github.com/imnive-design/inco-go/internal/inco"
 )
 
 const usage = `inco — invisible constraints, invincible code.

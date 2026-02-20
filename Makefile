@@ -1,10 +1,10 @@
-# Incognito Design // Inco Build Protocol
+# Imnive Design // Inco Build Protocol
 
 .PHONY: bootstrap gen build test run clean install
 
 INCO_BIN      := bin/inco
 
-# Require inco to be installed: go install github.com/incognito-design/inco-go/cmd/inco@latest
+# Require inco: go install github.com/imnive-design/inco-go/cmd/inco@latest
 INCO := $(shell command -v inco 2>/dev/null)
 
 # --- Bootstrap (plain go build → self-host, for when PATH inco is outdated) ---
@@ -19,14 +19,14 @@ bootstrap:
 # --- Generate overlay from contract directives ---
 gen:
 ifndef INCO
-	$(error "inco not found in PATH. Install with: GOPRIVATE=github.com/incognito-design/* go install github.com/incognito-design/inco-go/cmd/inco@latest")
+	$(error "inco not found in PATH. Install with: go install github.com/imnive-design/inco-go/cmd/inco@latest")
 endif
 	@inco gen .
 
 # --- Build with overlay (self-hosted) ---
 build:
 ifndef INCO
-	$(error "inco not found in PATH. Install with: GOPRIVATE=github.com/incognito-design/* go install github.com/incognito-design/inco-go/cmd/inco@latest")
+	$(error "inco not found in PATH. Install with: go install github.com/imnive-design/inco-go/cmd/inco@latest")
 endif
 	@inco gen .
 	@inco build -o $(INCO_BIN) ./cmd/inco
@@ -35,14 +35,14 @@ endif
 # --- Test with overlay ---
 test:
 ifndef INCO
-	$(error "inco not found in PATH. Install with: GOPRIVATE=github.com/incognito-design/* go install github.com/incognito-design/inco-go/cmd/inco@latest")
+	$(error "inco not found in PATH. Install with: go install github.com/imnive-design/inco-go/cmd/inco@latest")
 endif
 	@inco test ./...
 
 # --- Run with overlay ---
 run:
 ifndef INCO
-	$(error "inco not found in PATH. Install with: GOPRIVATE=github.com/incognito-design/* go install github.com/incognito-design/inco-go/cmd/inco@latest")
+	$(error "inco not found in PATH. Install with: go install github.com/imnive-design/inco-go/cmd/inco@latest")
 endif
 	@inco run .
 
@@ -53,7 +53,7 @@ clean:
 # --- Install: build self-hosted binary to GOPATH/bin ---
 install:
 ifndef INCO
-	$(error "inco not found in PATH. Install with: GOPRIVATE=github.com/incognito-design/* go install github.com/incognito-design/inco-go/cmd/inco@latest")
+	$(error "inco not found in PATH. Install with: go install github.com/imnive-design/inco-go/cmd/inco@latest")
 endif
 	@inco gen .
 	@go build -overlay .inco_cache/overlay.json -o $(GOPATH)/bin/inco ./cmd/inco 2>/dev/null || \

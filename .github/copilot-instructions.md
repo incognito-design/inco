@@ -110,8 +110,7 @@ _ = n // @inco: n != target, -break
 
 ```bash
 # 安装
-GOPRIVATE="github.com/incognito-design/*" \
-  go install github.com/incognito-design/inco-go/cmd/inco@latest
+go install github.com/imnive-design/inco-go/cmd/inco@latest
 
 # 日常开发
 inco build ./...     # gen + build

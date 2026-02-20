@@ -156,9 +156,8 @@ When directive arguments reference standard library packages (e.g. `fmt.Sprintf`
 ## Usage
 
 ```bash
-# Install (private repo, requires GOPRIVATE)
-GOPRIVATE="github.com/incognito-design/*" \
-  go install github.com/incognito-design/inco-go/cmd/inco@latest
+# Install
+go install github.com/imnive-design/inco-go/cmd/inco@latest
 
 # Generate overlay
 inco gen [dir]
@@ -231,8 +230,7 @@ This removes each generated `foo.go` and restores `foo.inco` → `foo.inco.go`.
 Inco requires itself to build (self-hosting). Install it first:
 
 ```bash
-GOPRIVATE="github.com/incognito-design/*" \
-  go install github.com/incognito-design/inco-go/cmd/inco@latest
+go install github.com/imnive-design/inco-go/cmd/inco@latest
 ```
 
 Then:
@@ -255,40 +253,39 @@ make install    # Install to $GOPATH/bin
 - **inco/(if+inco) ratio**: what fraction of all conditional guards are `@inco:` directives
 - **Per-file breakdown**: directive and `if` counts per file
 - **Unguarded functions**: list of functions without any `@inco:` directive
+- **Ignored files**: files/dirs excluded by `.incoignore`
 
 ```
 $ inco audit .
 inco audit — contract coverage report
 ======================================
 
-  Files scanned:  11
-  Functions:      65
+  Files scanned:  9
+  Functions:      52
 
 @inco: coverage:
-  With @inco::     38 / 65  (58.5%)
-  Without @inco::  27 / 65  (41.5%)
+  With @inco::     30 / 52  (57.7%)
+  Without @inco::  22 / 52  (42.3%)
 
 Directive vs if:
-  @inco::           73
+  @inco::           67
   ─────────────────────
-  Total directives:   73
-  Native if stmts:    69
-  inco/(if+inco):     51.4%
+  Total directives:   67
+  Native if stmts:    59
+  inco/(if+inco):     53.2%
 
-Per-file breakdown:
-  File                           @inco:  if  funcs  guarded
-  ─────────────────────────────  ──────  ──  ─────  ───────
-  example/demo.inco.go                5   0      3        3
-  example/edge_cases.inco.go          7   1      5        4
-  internal/inco/engine.inco.go       22  45     19       11
-  ...
+Ignored by .incoignore (4):
+  example/demo.inco.go
+  example/edge_cases.inco.go
+  example/generics.inco.go
+  example/transfer.inco.go
 ```
 
-The goal: drive `inco/(if+inco)` above 50%, meaning the majority of defensive checks live in directives rather than manual `if` statements. When Inco self-hosts, it already exceeds this target at **51.4%**.
+The goal: drive `inco/(if+inco)` above 50%, meaning the majority of defensive checks live in directives rather than manual `if` statements. When Inco self-hosts, it already exceeds this target at **53.2%**.
 
 ## How It Works
 
-1. `inco gen` scans all `.go` files for `// @inco:` comments
+1. `inco gen` scans all `.go` files for `// @inco:` comments (respecting `.incoignore`)
 2. Uses `go/ast` to classify each directive as **standalone** (comment-only line) or **inline** (attached to a statement)
 3. Generates shadow files in `.inco_cache/` — standalone directives become `if`-blocks in place; inline directives keep the code line and inject the `if`-block after it
 4. Injects `//line` directives so panic stack traces point back to **original** source lines
@@ -313,14 +310,30 @@ internal/inco/      Core engine:
   audit.inco.go       Contract coverage auditing
   directive.inco.go   Directive parsing (@inco:)
   engine.inco.go      AST processing, code generation, overlay I/O
+  ignore.inco.go      .incoignore file parsing and hierarchical matching
   release.inco.go     Release mode: bake guards into source
-  types.inco.go       Core types (Directive, ActionKind, Overlay, Recover)
+  types.inco.go       Core types (Directive, ActionKind, Overlay)
+  walk.inco.go        Shared file traversal logic
 example/            Demo files:
   demo.inco.go        @inco: basics
   transfer.inco.go    Multiple @inco: with panic
   edge_cases.inco.go  Closures, actions, edge cases
   generics.inco.go    Type parameters, generic containers
 ```
+
+## .incoignore
+
+Create a `.incoignore` file in any directory to exclude files from `inco gen` and `inco audit`. Patterns follow a simplified `.gitignore`-style syntax:
+
+```
+# Exclude example files from processing
+example/*.inco.go
+
+# Exclude a directory
+generated/
+```
+
+Nested `.incoignore` files are supported — rules in a subdirectory apply only to that subtree. `inco audit` reports which files were ignored.
 
 ## Self-Hosting Notes
 
@@ -364,10 +377,10 @@ Naive "is it a comment line? → standalone, else inline" broke on struct field 
 
 ### Current self-hosting stats
 
-- 77 `@inco:` directives, 65 `if` statements
-- **inco/(if+inco): 54.2%** — majority of guards are directives
-- 58.5% function coverage (38/65 functions guarded)
-- 11 source files mapped through overlay
+- 67 `@inco:` directives, 59 `if` statements
+- **inco/(if+inco): 53.2%** — majority of guards are directives
+- 57.7% function coverage (30/52 functions guarded)
+- 9 source files mapped through overlay
 
 ## Design
 

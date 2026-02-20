@@ -20,7 +20,7 @@ jobs:
           go-version-file: go.mod
 
       - name: Install inco
-        run: go install github.com/incognito-design/inco-go/cmd/inco@latest
+        run: go install github.com/imnive-design/inco-go/cmd/inco@latest
 
       - name: Release
         run: |
@@ -34,19 +34,14 @@ jobs:
             echo "  renamed: $f → $target"
           done
 
-          # Clean up cache
+          # Clean up cache and dev-only files
           rm -rf .inco_cache
-
-          # Update module path for inco-go
-          sed -i 's|github.com/incognito-design/inco$|github.com/incognito-design/inco-go|' go.mod
-          find . -name '*.go' -not -path './.git/*' -exec \
-            sed -i 's|github.com/incognito-design/inco/|github.com/incognito-design/inco-go/|g' {} +
 
       - name: Push to inco-go
         env:
           INCO_GO_TOKEN: ${{ secrets.INCO_GO_TOKEN }}
         run: |
-          git clone "https://x-access-token:${INCO_GO_TOKEN}@github.com/incognito-design/inco-go.git" /tmp/inco-go
+          git clone "https://x-access-token:${INCO_GO_TOKEN}@github.com/imnive-design/inco-go.git" /tmp/inco-go
 
           # Sync everything except .git and .github
           rsync -av --delete \
@@ -62,7 +57,7 @@ jobs:
           if git diff --cached --quiet; then
             echo "inco-go: no changes to push"
           else
-            git commit -m "release: incognito-design/inco@${GITHUB_SHA::7}"
+            git commit -m "release: imnive-design/inco@${GITHUB_SHA::7}"
             git push
             echo "inco-go: pushed release"
           fi
