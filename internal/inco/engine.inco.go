@@ -153,24 +153,28 @@ func (e *Engine) processFile(path string, f *ast.File) {
 	_ = err // @inco: err == nil, -panic(err)
 	lines := strings.Split(string(src), "\n")
 
-	// 3. Classify directives as standalone or inline.
+	// 3. Classify directives as standalone or inline using AST.
+	//    - "standalone": the entire line is a comment (starts with // or /*).
+	//    - "inline": the line contains an AST statement (assignment, return, etc.)
+	//      with a trailing @inco: comment.
+	//    - Otherwise (e.g. struct field comment): directive is ignored.
 	standalone := make(map[int]*Directive) // entire line is a comment
 	inline := make(map[int]*Directive)     // code with trailing @inco: comment
 
+	stmtLines := collectStmtLines(f, e.fset)
 	for lineNum, d := range directives {
 		idx := lineNum - 1
-		// @inco: idx >= 0 && idx < len(lines), -continue
-		trimmed := strings.TrimSpace(lines[idx])
-		isStandaloneLine := strings.HasPrefix(trimmed, "//") || strings.HasPrefix(trimmed, "/*")
-		if isStandaloneLine {
-			standalone[lineNum] = d
-		} else if atIdx := strings.Index(trimmed, "// @inco:"); atIdx > 0 {
-			// Inline directive: only if the code part is a blank-identifier use (_ =).
-			codePart := strings.TrimSpace(trimmed[:atIdx])
-			if strings.HasPrefix(codePart, "_ =") {
-				inline[lineNum] = d
-			}
+		if idx < 0 || idx >= len(lines) {
+			continue
 		}
+		trimmed := strings.TrimSpace(lines[idx])
+		isCommentLine := strings.HasPrefix(trimmed, "//") || strings.HasPrefix(trimmed, "/*")
+		if isCommentLine {
+			standalone[lineNum] = d
+		} else if stmtLines[lineNum] {
+			inline[lineNum] = d
+		}
+		// else: directive in non-statement context (e.g. struct field) — skip
 	}
 
 	// 4. Build output: replace directive lines with if-blocks, add //line
@@ -387,4 +391,24 @@ func (e *Engine) writeOverlay() {
 // extractIndent returns the leading whitespace of a line.
 func extractIndent(line string) string {
 	return line[:len(line)-len(strings.TrimLeft(line, " \t"))]
+}
+
+// collectStmtLines walks the AST and returns a set of line numbers that
+// contain statements inside function bodies. A directive comment whose
+// line appears in this set is classified as "inline" rather than "standalone".
+func collectStmtLines(f *ast.File, fset *token.FileSet) map[int]bool {
+	lines := make(map[int]bool)
+	ast.Inspect(f, func(n ast.Node) bool {
+		if n == nil {
+			return false
+		}
+		switch n.(type) {
+		case *ast.AssignStmt, *ast.ExprStmt, *ast.ReturnStmt,
+			*ast.IncDecStmt, *ast.SendStmt, *ast.GoStmt, *ast.DeferStmt,
+			*ast.BranchStmt:
+			lines[fset.Position(n.Pos()).Line] = true
+		}
+		return true
+	})
+	return lines
 }
