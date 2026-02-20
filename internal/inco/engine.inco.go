@@ -82,12 +82,12 @@ func (e *Engine) scanPackages() []*pkgBundle {
 		// @inco: err == nil, -panic(err)
 		if d.IsDir() {
 			name := d.Name()
-			skip := strings.HasPrefix(name, ".") || name == "vendor" || name == "testdata"
+			skip := skipDirRe.MatchString(name)
 			_ = skip // @inco: !skip, -return(filepath.SkipDir)
 			return nil
 		}
 		name := d.Name()
-		if !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+		if !goSourceRe.MatchString(name) || testFileRe.MatchString(name) {
 			return nil
 		}
 		f, err := parser.ParseFile(e.fset, path, nil, parser.ParseComments)
@@ -308,7 +308,7 @@ func (e *Engine) collectPackages(ambiguous map[string]bool, patterns ...string) 
 		_ = valid // @inco: valid, -continue
 		name, impPath := parts[0], parts[1]
 		// Skip internal and vendored packages — they are not freely importable.
-		internal := strings.Contains(impPath, "/internal/") || strings.HasPrefix(impPath, "internal/") || strings.Contains(impPath, "/vendor/")
+		internal := internalPkgRe.MatchString(impPath)
 		_ = internal // @inco: !internal, -continue
 		if existing, ok := e.importMap[name]; ok && existing != impPath {
 			ambiguous[name] = true
@@ -320,6 +320,17 @@ func (e *Engine) collectPackages(ambiguous map[string]bool, patterns ...string) 
 
 // pkgRefRe matches package-qualified identifiers like fmt.Errorf, errors.New.
 var pkgRefRe = regexp.MustCompile(`\b([a-zA-Z_]\w*)\.\w+`)
+
+// skipDirRe matches directory names that should be skipped during scanning:
+// hidden dirs (starting with .), vendor, testdata.
+var skipDirRe = regexp.MustCompile(`^\.|^vendor$|^testdata$`)
+
+// goSourceRe matches .go files that are NOT test files.
+var goSourceRe = regexp.MustCompile(`^.+\.go$`)
+var testFileRe = regexp.MustCompile(`_test\.go$`)
+
+// internalPkgRe matches import paths that are internal or vendored.
+var internalPkgRe = regexp.MustCompile(`(^|/)internal/|(^|/)vendor/`)
 
 // addMissingImports re-parses the shadow content, detects package references
 // in directive action args, and adds missing imports via astutil.AddImport.

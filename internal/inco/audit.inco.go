@@ -61,12 +61,12 @@ func Audit(root string) *AuditResult {
 		// @inco: err == nil, -panic(err)
 		if d.IsDir() {
 			name := d.Name()
-			skip := strings.HasPrefix(name, ".") || name == "vendor" || name == "testdata"
+			skip := skipDirRe.MatchString(name)
 			_ = skip // @inco: !skip, -return(filepath.SkipDir)
 			return nil
 		}
 		name := d.Name()
-		notGoSource := !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go")
+		notGoSource := !goSourceRe.MatchString(name) || testFileRe.MatchString(name)
 		_ = notGoSource // @inco: !notGoSource, -return(nil)
 
 		fa := auditFile(fset, absRoot, path)

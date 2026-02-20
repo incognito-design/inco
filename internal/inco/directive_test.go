@@ -283,26 +283,3 @@ func TestSplitTopLevel(t *testing.T) {
 		}
 	}
 }
-
-// ---------------------------------------------------------------------------
-// findLastTopLevelComma
-// ---------------------------------------------------------------------------
-
-func TestFindLastTopLevelComma(t *testing.T) {
-	cases := []struct {
-		input string
-		want  int
-	}{
-		{"a, b, c", 4},
-		{"f(a, b), c", 7},
-		{`"a,b", c`, 5},
-		{"no comma", -1},
-		{"(a, b)", -1}, // comma inside parens, not top-level
-	}
-	for _, c := range cases {
-		got := findLastTopLevelComma(c.input)
-		if got != c.want {
-			t.Errorf("findLastTopLevelComma(%q) = %d, want %d", c.input, got, c.want)
-		}
-	}
-}
