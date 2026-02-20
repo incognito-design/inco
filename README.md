@@ -251,12 +251,51 @@ inco build ./...
 inco test ./...
 inco run .
 
+# Release: bake guards into source tree (no overlay needed)
+inco release [dir]
+
+# Revert release
+inco release clean [dir]
+
 # Contract coverage audit
 inco audit [dir]
 
 # Clean cache
 inco clean [dir]
 ```
+
+## Release Mode
+
+`inco release` copies the generated guard files from `.inco_cache/` directly
+into your source tree, using `//go:build` tags for isolation:
+
+```bash
+inco release .
+```
+
+This does two things for each guarded file:
+
+1. **Original** `foo.go` — prepends `//go:build !inco` (excluded when tag is active)
+2. **Guard copy** `foo_inco.go` — shadow content with `//go:build inco` (included when tag is active)
+
+After release, build with or without contracts — no `-overlay` required:
+
+```bash
+go build -tags inco ./...    # with contracts (uses foo_inco.go)
+go build ./...               # without contracts (uses foo.go)
+```
+
+This is useful for:
+- **Distribution**: ship a self-contained project with optional contracts
+- **CI/CD**: switch contracts on/off via build tags without needing the `inco` tool at build time
+
+To revert and go back to overlay-based development:
+
+```bash
+inco release clean .
+```
+
+This removes all `_inco.go` files and strips the `//go:build !inco` tags from originals.
 
 ## Build from Source
 
@@ -330,11 +369,12 @@ The goal: drive `@require` coverage up and the directive/if ratio toward 1.0+, m
 ## Project Structure
 
 ```
-cmd/inco/           CLI: gen, build, test, run, audit, clean
+cmd/inco/           CLI: gen, build, test, run, audit, release, clean
 internal/inco/      Core engine:
   audit.go            Contract coverage auditing
   directive.go        Directive parsing (@require, @must, @expect, @ensure)
   engine.go           AST processing, code generation, overlay I/O
+  release.go          Release mode: bake guards into source with build tags
 example/            Demo files:
   demo.go             @require + @must basics
   transfer.go         Multiple @require, @must

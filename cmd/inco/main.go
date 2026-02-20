@@ -11,12 +11,14 @@ import (
 const usage = `inco — invisible constraints, invincible code.
 
 Usage:
-  inco gen [dir]       Scan source files and generate overlay
-  inco build [args]    Run gen + go build -overlay
-  inco test [args]     Run gen + go test -overlay
-  inco run [args]      Run gen + go run -overlay
-  inco audit [dir]     Contract coverage report
-  inco clean [dir]     Remove .inco_cache
+  inco gen [dir]           Scan source files and generate overlay
+  inco build [args]        Run gen + go build -overlay
+  inco test [args]         Run gen + go test -overlay
+  inco run [args]          Run gen + go run -overlay
+  inco audit [dir]         Contract coverage report
+  inco release [dir]       Copy guards into source tree with //go:build inco
+  inco release clean [dir] Remove released files and restore originals
+  inco clean [dir]         Remove .inco_cache
 
 If [dir] is omitted, the current directory is used.
 `
@@ -43,6 +45,14 @@ func main() {
 		runGo("run", ".", os.Args[2:])
 	case "audit":
 		runAudit(getDir(2)).PrintReport(os.Stdout)
+	case "release":
+		if len(os.Args) > 2 && os.Args[2] == "clean" {
+			runReleaseClean(getDir(3))
+		} else {
+			dir := getDir(2)
+			runGen(dir)
+			runRelease(dir)
+		}
 	case "clean":
 		dir := getDir(2)
 		_ = os.RemoveAll(filepath.Join(dir, ".inco_cache")) // @must
@@ -78,6 +88,16 @@ func runGen(dir string) {
 func runAudit(dir string) *inco.AuditResult {
 	absDir, _ := filepath.Abs(dir) // @must
 	return inco.Audit(absDir)
+}
+
+func runRelease(dir string) {
+	absDir, _ := filepath.Abs(dir) // @must
+	inco.Release(absDir)
+}
+
+func runReleaseClean(dir string) {
+	absDir, _ := filepath.Abs(dir) // @must
+	inco.ReleaseClean(absDir)
 }
 
 func runGo(subcmd, dir string, extraArgs []string) {

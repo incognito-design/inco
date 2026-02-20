@@ -86,7 +86,9 @@ func (e *Engine) scanPackages() []*pkgBundle {
 			return nil
 		}
 		name := d.Name()
-		if !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+		if !strings.HasSuffix(name, ".go") ||
+			strings.HasSuffix(name, "_test.go") ||
+			strings.HasSuffix(name, "_inco.go") {
 			return nil
 		}
 		f, _ := parser.ParseFile(e.fset, path, nil, parser.ParseComments) // @must
