@@ -2,136 +2,113 @@ package inco
 
 import "strings"
 
-// keywords maps directive prefixes to their DirectiveKind.
-var keywords = map[string]DirectiveKind{
-	"@require": KindRequire,
-	"@must":    KindMust,
-	"@expect":  KindExpect,
-	"@ensure":  KindEnsure,
-}
-
-// actionKeywords maps action names to their ActionKind.
+// actionKeywords maps -prefixed action names to their ActionKind.
 var actionKeywords = map[string]ActionKind{
-	"panic":    ActionPanic,
-	"return":   ActionReturn,
-	"continue": ActionContinue,
-	"break":    ActionBreak,
+	"-panic":    ActionPanic,
+	"-return":   ActionReturn,
+	"-continue": ActionContinue,
+	"-break":    ActionBreak,
 }
 
 // ParseDirective extracts a Directive from a comment string.
-// Returns nil when the comment is not a valid directive.
+// Returns nil when the comment is not a valid @inco: directive.
+//
+// Syntax: @inco: <expr>[, -action[(args...)]]
 func ParseDirective(comment string) *Directive {
 	s := stripComment(comment)
 	if s == "" {
 		return nil
 	}
 
-	var kind DirectiveKind
-	var keyword string
-	for kw, k := range keywords {
-		if strings.HasPrefix(s, kw) {
-			kind = k
-			keyword = kw
-			break
-		}
-	}
-	if keyword == "" {
+	if !strings.HasPrefix(s, "@inco:") {
 		return nil
 	}
 
-	rest := strings.TrimSpace(s[len(keyword):])
-	d := &Directive{Kind: kind, Action: ActionPanic}
-
-	if parse, ok := kindParsers[kind]; ok {
-		return parse(d, rest)
-	}
-	return d
-}
-
-// kindParsers maps each DirectiveKind to its rest-string parser.
-var kindParsers = map[DirectiveKind]func(d *Directive, rest string) *Directive{
-	KindRequire: parseRequireRest,
-	KindMust:    parseInlineRest,
-	KindExpect:  parseInlineRest,
-	KindEnsure:  parseRequireRest,
-}
-
-func parseRequireRest(d *Directive, rest string) *Directive {
+	rest := strings.TrimSpace(s[len("@inco:"):])
 	if rest == "" {
 		return nil // expression is mandatory
 	}
 
-	// Find the rightmost action keyword split across all known actions.
-	type actionMatch struct {
-		pos    int
-		action ActionKind
-		args   []string
-	}
-	var best *actionMatch
+	d := &Directive{Action: ActionPanic}
+	return parseRequireRest(d, rest)
+}
 
-	for keyword, action := range actionKeywords {
-		// Try "expr keyword(args...)" — find rightmost " keyword("
-		needle := " " + keyword + "("
-		if idx := strings.LastIndex(rest, needle); idx >= 0 {
-			argStart := idx + 1 + len(keyword) // position of '('
-			args, remaining, ok := parseActionArgs(rest[argStart:])
-			if ok && strings.TrimSpace(remaining) == "" {
-				if best == nil || idx > best.pos {
-					best = &actionMatch{pos: idx, action: action, args: args}
+// parseRequireRest parses the rest after the "@inco:" keyword.
+//
+// Two forms:
+//   - expression only
+//   - expression, -action[(args...)]
+func parseRequireRest(d *Directive, rest string) *Directive {
+	// Split on the last top-level comma to find the action part.
+	commaIdx := findLastTopLevelComma(rest)
+	if commaIdx >= 0 {
+		afterComma := strings.TrimSpace(rest[commaIdx+1:])
+		if strings.HasPrefix(afterComma, "-") {
+			// Try to match an action keyword.
+			for keyword, action := range actionKeywords {
+				if !strings.HasPrefix(afterComma, keyword) {
+					continue
 				}
-			}
-		}
-
-		// Try "expr keyword" — bare keyword at end
-		suffix := " " + keyword
-		if strings.HasSuffix(rest, suffix) {
-			idx := len(rest) - len(suffix)
-			if best == nil || idx > best.pos {
-				best = &actionMatch{pos: idx, action: action}
+				after := afterComma[len(keyword):]
+				if len(after) == 0 {
+					// bare action: -continue, -break, -return, -panic
+					d.Action = action
+					d.Expr = strings.TrimSpace(rest[:commaIdx])
+					if d.Expr == "" {
+						return nil
+					}
+					return d
+				}
+				if after[0] == '(' {
+					// action with args: -panic("msg"), -return(0, err)
+					args, remaining, ok := parseActionArgs(after)
+					if ok && strings.TrimSpace(remaining) == "" {
+						d.Action = action
+						d.ActionArgs = args
+						d.Expr = strings.TrimSpace(rest[:commaIdx])
+						if d.Expr == "" {
+							return nil
+						}
+						return d
+					}
+				}
+				// Not a valid action with that keyword; keep looking.
 			}
 		}
 	}
 
-	if best != nil {
-		d.Action = best.action
-		d.ActionArgs = best.args
-		d.Expr = strings.TrimSpace(rest[:best.pos])
-		if d.Expr == "" {
-			return nil
-		}
-		return d
-	}
-
-	// No action found — entire rest is the expression.
+	// No comma+action found — entire rest is the expression.
 	d.Expr = rest
 	return d
 }
 
-func parseInlineRest(d *Directive, rest string) *Directive {
-	if rest == "" {
-		return d // bare → default panic
-	}
-
-	for keyword, action := range actionKeywords {
-		if !strings.HasPrefix(rest, keyword) {
-			continue
-		}
-		after := rest[len(keyword):]
-		if len(after) > 0 && after[0] != ' ' && after[0] != '\t' && after[0] != '(' {
-			continue // not a full keyword match
-		}
-		d.Action = action
-		after = strings.TrimSpace(after)
-		if strings.HasPrefix(after, "(") {
-			args, _, ok := parseActionArgs(after)
-			if ok {
-				d.ActionArgs = args
+// findLastTopLevelComma returns the index of the last comma at depth 0,
+// respecting parentheses, brackets, braces and string literals.
+// Returns -1 if no top-level comma is found.
+func findLastTopLevelComma(s string) int {
+	depth := 0
+	inStr := false
+	lastComma := -1
+	for i := 0; i < len(s); i++ {
+		ch := s[i]
+		switch {
+		case ch == '"' && !inStr:
+			inStr = true
+		case ch == '"' && inStr && (i == 0 || s[i-1] != '\\'):
+			inStr = false
+		case inStr:
+			if ch == '\\' {
+				i++ // skip next
 			}
+		case ch == '(' || ch == '[' || ch == '{':
+			depth++
+		case ch == ')' || ch == ']' || ch == '}':
+			depth--
+		case ch == ',' && depth == 0:
+			lastComma = i
 		}
-		return d
 	}
-
-	return nil // unrecognized action
+	return lastComma
 }
 
 // ---------------------------------------------------------------------------

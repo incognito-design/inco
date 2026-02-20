@@ -38,7 +38,9 @@ func readShadow(t *testing.T, e *Engine) string {
 	return ""
 }
 
-// --- No directives ---
+// ---------------------------------------------------------------------------
+// No directives — no overlay
+// ---------------------------------------------------------------------------
 
 func TestEngine_NoDirectives(t *testing.T) {
 	dir := setupDir(t, map[string]string{
@@ -51,16 +53,18 @@ func TestEngine_NoDirectives(t *testing.T) {
 	}
 }
 
-// --- Default action (panic) ---
+// ---------------------------------------------------------------------------
+// Default action (panic)
+// ---------------------------------------------------------------------------
 
-func TestEngine_RequireExpr_DefaultPanic(t *testing.T) {
+func TestEngine_DefaultPanic(t *testing.T) {
 	dir := setupDir(t, map[string]string{
 		"main.go": `package main
 
 import "fmt"
 
 func Greet(name string) {
-	// @require len(name) > 0
+	// @inco: len(name) > 0
 	fmt.Println(name)
 }
 `,
@@ -74,21 +78,23 @@ func Greet(name string) {
 	if !strings.Contains(shadow, "panic(") {
 		t.Error("shadow should contain panic (default action)")
 	}
-	if !strings.Contains(shadow, "require violation") {
+	if !strings.Contains(shadow, "inco violation") {
 		t.Error("shadow should contain default violation message")
 	}
 }
 
-// --- Panic with custom message ---
+// ---------------------------------------------------------------------------
+// Custom panic message
+// ---------------------------------------------------------------------------
 
-func TestEngine_RequirePanicCustomMsg(t *testing.T) {
+func TestEngine_PanicCustomMessage(t *testing.T) {
 	dir := setupDir(t, map[string]string{
 		"main.go": `package main
 
 import "fmt"
 
 func Process(x int) {
-	// @require x > 0 panic("x must be positive")
+	// @inco: x > 0, -panic("x must be positive")
 	fmt.Println(x)
 }
 `,
@@ -101,7 +107,29 @@ func Process(x int) {
 	}
 }
 
-// --- Multiple directives ---
+func TestEngine_PanicFmtSprintf(t *testing.T) {
+	dir := setupDir(t, map[string]string{
+		"main.go": `package main
+
+import "fmt"
+
+func Check(x int) {
+	// @inco: x > 0, -panic(fmt.Sprintf("bad value: %d", x))
+	fmt.Println(x)
+}
+`,
+	})
+	e := NewEngine(dir)
+	e.Run()
+	shadow := readShadow(t, e)
+	if !strings.Contains(shadow, `panic(fmt.Sprintf("bad value: %d", x))`) {
+		t.Errorf("shadow should contain custom panic with Sprintf, got:\n%s", shadow)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Multiple directives in same function
+// ---------------------------------------------------------------------------
 
 func TestEngine_MultipleDirectives(t *testing.T) {
 	dir := setupDir(t, map[string]string{
@@ -110,8 +138,8 @@ func TestEngine_MultipleDirectives(t *testing.T) {
 import "fmt"
 
 func Process(name string, age int) {
-	// @require len(name) > 0
-	// @require age > 0
+	// @inco: len(name) > 0
+	// @inco: age > 0
 	fmt.Println(name, age)
 }
 `,
@@ -133,7 +161,9 @@ func Process(name string, age int) {
 	}
 }
 
-// --- Line directives ---
+// ---------------------------------------------------------------------------
+// //line directives
+// ---------------------------------------------------------------------------
 
 func TestEngine_LineDirectives(t *testing.T) {
 	dir := setupDir(t, map[string]string{
@@ -142,7 +172,7 @@ func TestEngine_LineDirectives(t *testing.T) {
 import "fmt"
 
 func Hello(name string) {
-	// @require len(name) > 0
+	// @inco: len(name) > 0
 	fmt.Println(name)
 }
 `,
@@ -155,14 +185,16 @@ func Hello(name string) {
 	}
 }
 
-// --- Overlay JSON ---
+// ---------------------------------------------------------------------------
+// Overlay JSON
+// ---------------------------------------------------------------------------
 
 func TestEngine_OverlayJSON(t *testing.T) {
 	dir := setupDir(t, map[string]string{
 		"main.go": `package main
 
 func Do(x int) {
-	// @require x > 0
+	// @inco: x > 0
 	_ = x
 }
 `,
@@ -190,14 +222,16 @@ func Do(x int) {
 	}
 }
 
-// --- Skips hidden dirs ---
+// ---------------------------------------------------------------------------
+// Skips hidden directories
+// ---------------------------------------------------------------------------
 
 func TestEngine_SkipsHiddenDirs(t *testing.T) {
 	dir := setupDir(t, map[string]string{
 		".hidden/main.go": `package hidden
 
 func X(x int) {
-	// @require x > 0
+	// @inco: x > 0
 }
 `,
 		"main.go": "package main\n\nfunc main() {}\n",
@@ -209,14 +243,16 @@ func X(x int) {
 	}
 }
 
-// --- Content hash stability ---
+// ---------------------------------------------------------------------------
+// Content hash stability
+// ---------------------------------------------------------------------------
 
 func TestEngine_ContentHashStable(t *testing.T) {
 	dir := setupDir(t, map[string]string{
 		"main.go": `package main
 
 func Do(x int) {
-	// @require x > 0
+	// @inco: x > 0
 	_ = x
 }
 `,
@@ -241,7 +277,9 @@ func Do(x int) {
 	}
 }
 
-// --- Closure support ---
+// ---------------------------------------------------------------------------
+// Closure support
+// ---------------------------------------------------------------------------
 
 func TestEngine_Closure(t *testing.T) {
 	dir := setupDir(t, map[string]string{
@@ -251,7 +289,7 @@ import "fmt"
 
 func Outer() {
 	f := func(x int) {
-		// @require x > 0
+		// @inco: x > 0
 		fmt.Println(x)
 	}
 	f(42)
@@ -267,503 +305,15 @@ func Outer() {
 }
 
 // ---------------------------------------------------------------------------
-// @must tests
+// -return action
 // ---------------------------------------------------------------------------
 
-func TestEngine_Must_DefaultPanic(t *testing.T) {
-	dir := setupDir(t, map[string]string{
-		"main.go": `package main
-
-import "fmt"
-
-func Run() {
-	result, _ := fmt.Println("hello") // @must
-	_ = result
-}
-`,
-	})
-	e := NewEngine(dir)
-	e.Run()
-	shadow := readShadow(t, e)
-	// _ should be replaced with __inco_err
-	if !strings.Contains(shadow, "__inco_err") {
-		t.Errorf("should contain __inco_err, got:\n%s", shadow)
-	}
-	// Should have if __inco_err != nil { panic(__inco_err) }
-	if !strings.Contains(shadow, "__inco_err != nil") {
-		t.Errorf("should contain error check, got:\n%s", shadow)
-	}
-	if !strings.Contains(shadow, "panic(__inco_err)") {
-		t.Errorf("should panic with error var, got:\n%s", shadow)
-	}
-	// Inline comment should be stripped
-	if strings.Contains(shadow, "// @must") {
-		t.Error("inline comment should be stripped from shadow")
-	}
-}
-
-func TestEngine_Must_Return_removed(t *testing.T) {
-	// Return action removed — @must now only supports panic.
-	// This test verifies that @must with no explicit action defaults to panic.
-	dir := setupDir(t, map[string]string{
-		"main.go": `package main
-
-import "fmt"
-
-func SafeRun() {
-	_, _ = fmt.Println("hello") // @must
-}
-`,
-	})
-	e := NewEngine(dir)
-	e.Run()
-	shadow := readShadow(t, e)
-	if !strings.Contains(shadow, "panic(__inco_err)") {
-		t.Errorf("should contain panic, got:\n%s", shadow)
-	}
-}
-
-func TestEngine_Must_PanicWithSubstitution(t *testing.T) {
-	dir := setupDir(t, map[string]string{
-		"main.go": `package main
-
-import "fmt"
-
-func Fetch() {
-	_, _ = fmt.Println("hello") // @must panic(fmt.Sprintf("failed: %v", _))
-}
-`,
-	})
-	e := NewEngine(dir)
-	e.Run()
-	shadow := readShadow(t, e)
-	// _ in action args should be replaced with __inco_err
-	if !strings.Contains(shadow, `panic(fmt.Sprintf("failed: %v", __inco_err))`) {
-		t.Errorf("_ should be substituted with __inco_err, got:\n%s", shadow)
-	}
-}
-
-func TestEngine_Must_PanicCustomMsg(t *testing.T) {
-	dir := setupDir(t, map[string]string{
-		"main.go": `package main
-
-import "fmt"
-
-func Run() {
-	_, _ = fmt.Println("hello") // @must panic("print failed")
-	fmt.Println("done")
-}
-`,
-	})
-	e := NewEngine(dir)
-	e.Run()
-	shadow := readShadow(t, e)
-	if !strings.Contains(shadow, `panic("print failed")`) {
-		t.Errorf("should contain custom panic message, got:\n%s", shadow)
-	}
-}
-
-// ---------------------------------------------------------------------------
-// @expect tests
-// ---------------------------------------------------------------------------
-
-func TestEngine_Expect_DefaultPanic(t *testing.T) {
-	dir := setupDir(t, map[string]string{
-		"main.go": `package main
-
-func Run() {
-	m := map[string]int{"a": 1}
-	v, _ := m["a"] // @expect
-	_ = v
-}
-`,
-	})
-	e := NewEngine(dir)
-	e.Run()
-	shadow := readShadow(t, e)
-	if !strings.Contains(shadow, "__inco_ok") {
-		t.Errorf("should contain __inco_ok, got:\n%s", shadow)
-	}
-	if !strings.Contains(shadow, "!__inco_ok") {
-		t.Errorf("should contain !__inco_ok, got:\n%s", shadow)
-	}
-	if !strings.Contains(shadow, "expect violation") {
-		t.Errorf("should contain expect violation message, got:\n%s", shadow)
-	}
-}
-
-func TestEngine_Expect_Panic(t *testing.T) {
-	dir := setupDir(t, map[string]string{
-		"main.go": `package main
-
-func Run() {
-	m := map[string]int{"a": 1}
-	v, _ := m["a"] // @expect panic("key not found")
-	_ = v
-}
-`,
-	})
-	e := NewEngine(dir)
-	e.Run()
-	shadow := readShadow(t, e)
-	if !strings.Contains(shadow, "__inco_ok") {
-		t.Errorf("should contain __inco_ok, got:\n%s", shadow)
-	}
-	if !strings.Contains(shadow, `panic("key not found")`) {
-		t.Errorf("should contain custom panic msg, got:\n%s", shadow)
-	}
-}
-
-// ---------------------------------------------------------------------------
-// Cross-function @must scope tracking
-// ---------------------------------------------------------------------------
-
-func TestEngine_Must_MultipleFunctions(t *testing.T) {
-	dir := setupDir(t, map[string]string{
-		"main.go": `package main
-
-import "os"
-
-func First() {
-	_ = os.MkdirAll("/tmp/inco_test_1", 0o755) // @must
-}
-
-func Second() {
-	_ = os.MkdirAll("/tmp/inco_test_2", 0o755) // @must
-}
-`,
-	})
-	e := NewEngine(dir)
-	e.Run()
-	shadow := readShadow(t, e)
-	// Both functions should have := declarations (scope reset).
-	count := strings.Count(shadow, "__inco_err :=")
-	if count != 2 {
-		t.Errorf("expected 2 ':=' declarations across functions, got %d\n%s", count, shadow)
-	}
-}
-
-// ---------------------------------------------------------------------------
-// Corner case tests
-// ---------------------------------------------------------------------------
-
-// Single-value `_ = foo() // @must` — promote = to :=
-func TestEngine_Must_SingleValue(t *testing.T) {
-	dir := setupDir(t, map[string]string{
-		"main.go": `package main
-
-import "fmt"
-
-func Run() {
-	_ = fmt.Errorf("boom") // @must
-}
-`,
-	})
-	e := NewEngine(dir)
-	e.Run()
-	shadow := readShadow(t, e)
-	if !strings.Contains(shadow, "__inco_err :=") {
-		t.Errorf("should promote = to :=, got:\n%s", shadow)
-	}
-	if !strings.Contains(shadow, "panic(__inco_err)") {
-		t.Errorf("should panic with error var, got:\n%s", shadow)
-	}
-}
-
-// Multiple @must in same function — first := then =
-func TestEngine_Must_SameFuncMultiple(t *testing.T) {
-	dir := setupDir(t, map[string]string{
-		"main.go": `package main
-
-import "fmt"
-
-func Run() {
-	_, _ = fmt.Println("a") // @must
-	_, _ = fmt.Println("b") // @must
-}
-`,
-	})
-	e := NewEngine(dir)
-	e.Run()
-	shadow := readShadow(t, e)
-	declCount := strings.Count(shadow, "__inco_err :=")
-	plainCount := strings.Count(shadow, "__inco_err =") // does not match ":="
-	if declCount != 1 {
-		t.Errorf("expected 1 ':=' declaration, got %d\n%s", declCount, shadow)
-	}
-	if plainCount != 1 {
-		t.Errorf("expected 1 plain '=' assignment, got %d\n%s", plainCount, shadow)
-	}
-}
-
-// Mixed @must + @expect in same function — separate variables, both get :=
-func TestEngine_MixedMustExpect(t *testing.T) {
-	dir := setupDir(t, map[string]string{
-		"main.go": `package main
-
-import "fmt"
-
-func Run() {
-	_, _ = fmt.Println("hello") // @must
-	m := map[string]int{"a": 1}
-	v, _ := m["a"] // @expect
-	_ = v
-}
-`,
-	})
-	e := NewEngine(dir)
-	e.Run()
-	shadow := readShadow(t, e)
-	if !strings.Contains(shadow, "__inco_err :=") {
-		t.Errorf("should have __inco_err :=, got:\n%s", shadow)
-	}
-	if !strings.Contains(shadow, "__inco_ok :=") {
-		t.Errorf("should have __inco_ok :=, got:\n%s", shadow)
-	}
-	if !strings.Contains(shadow, "panic(__inco_err)") {
-		t.Error("should panic with __inco_err")
-	}
-	if !strings.Contains(shadow, "!__inco_ok") {
-		t.Error("should check !__inco_ok")
-	}
-}
-
-// Consecutive @must lines — no code gap between them
-func TestEngine_Must_Consecutive(t *testing.T) {
-	dir := setupDir(t, map[string]string{
-		"main.go": `package main
-
-import "fmt"
-
-func Run() {
-	_, _ = fmt.Println("a") // @must
-	_, _ = fmt.Println("b") // @must
-	fmt.Println("done")
-}
-`,
-	})
-	e := NewEngine(dir)
-	e.Run()
-	shadow := readShadow(t, e)
-	// Both error checks should be present
-	errChecks := strings.Count(shadow, "__inco_err != nil")
-	if errChecks != 2 {
-		t.Errorf("expected 2 error checks, got %d\n%s", errChecks, shadow)
-	}
-}
-
-// @expect for type assertion
-func TestEngine_Expect_TypeAssertion(t *testing.T) {
-	dir := setupDir(t, map[string]string{
-		"main.go": `package main
-
-import "fmt"
-
-func MustString(x any) string {
-	v, _ := x.(string) // @expect panic("not a string")
-	return v
-}
-
-func main() {
-	fmt.Println(MustString("hello"))
-}
-`,
-	})
-	e := NewEngine(dir)
-	e.Run()
-	shadow := readShadow(t, e)
-	if !strings.Contains(shadow, "__inco_ok") {
-		t.Errorf("should replace _ with __inco_ok, got:\n%s", shadow)
-	}
-	if !strings.Contains(shadow, `panic("not a string")`) {
-		t.Errorf("should have custom panic, got:\n%s", shadow)
-	}
-}
-
-// Nested closure — @must inside inner closure gets its own scope
-func TestEngine_Must_NestedClosure(t *testing.T) {
-	dir := setupDir(t, map[string]string{
-		"main.go": `package main
-
-import "fmt"
-
-func Outer() {
-	outer := func() {
-		inner := func() {
-			_, _ = fmt.Println("nested") // @must
-		}
-		inner()
-	}
-	outer()
-}
-`,
-	})
-	e := NewEngine(dir)
-	e.Run()
-	shadow := readShadow(t, e)
-	if !strings.Contains(shadow, "__inco_err :=") {
-		t.Errorf("nested closure should get :=, got:\n%s", shadow)
-	}
-}
-
-// Variable name containing underscore — replaceLastBlank must not touch it
-func TestEngine_Must_UnderscoreInVarName(t *testing.T) {
-	dir := setupDir(t, map[string]string{
-		"main.go": `package main
-
-import "fmt"
-
-func Run() {
-	my_result, _ := fmt.Println("hi") // @must
-	_ = my_result
-}
-`,
-	})
-	e := NewEngine(dir)
-	e.Run()
-	shadow := readShadow(t, e)
-	if !strings.Contains(shadow, "my_result") {
-		t.Errorf("should preserve my_result, got:\n%s", shadow)
-	}
-	if strings.Contains(shadow, "my__inco_err") {
-		t.Errorf("should not replace _ inside identifier, got:\n%s", shadow)
-	}
-}
-
-// @must/@expect comment on struct field — must NOT be processed
-func TestEngine_DirectiveOnStructField_Ignored(t *testing.T) {
-	dir := setupDir(t, map[string]string{
-		"main.go": `package main
-
-type Config struct {
-	Name string // @must not be empty
-	Port int    // @expect positive
-}
-
-func main() {}
-`,
-	})
-	e := NewEngine(dir)
-	e.Run()
-	if len(e.Overlay.Replace) != 0 {
-		t.Errorf("struct field comments should not trigger overlay, got %d entries", len(e.Overlay.Replace))
-	}
-}
-
-// @must where original code already uses := — should not double-colon
-func TestEngine_Must_AlreadyShortDecl(t *testing.T) {
-	dir := setupDir(t, map[string]string{
-		"main.go": `package main
-
-import "fmt"
-
-func Run() {
-	result, _ := fmt.Println("hello") // @must
-	fmt.Println(result)
-}
-`,
-	})
-	e := NewEngine(dir)
-	e.Run()
-	shadow := readShadow(t, e)
-	// Should have exactly one := and it must not be :=:= or similar
-	if strings.Contains(shadow, ":=:=") || strings.Contains(shadow, "::=") {
-		t.Errorf("double declaration operator, got:\n%s", shadow)
-	}
-	if !strings.Contains(shadow, "__inco_err") {
-		t.Errorf("should contain __inco_err, got:\n%s", shadow)
-	}
-}
-
-// ---------------------------------------------------------------------------
-// @ensure tests (postcondition via defer)
-// ---------------------------------------------------------------------------
-
-func TestEngine_Ensure_DefaultPanic(t *testing.T) {
-	dir := setupDir(t, map[string]string{
-		"main.go": `package main
-
-func Compute(x int) int {
-	result := x * 2
-	// @ensure result > 0
-	return result
-}
-`,
-	})
-	e := NewEngine(dir)
-	e.Run()
-	shadow := readShadow(t, e)
-	if !strings.Contains(shadow, "defer func()") {
-		t.Errorf("should contain defer func(), got:\n%s", shadow)
-	}
-	if !strings.Contains(shadow, "!(result > 0)") {
-		t.Errorf("should contain negated condition, got:\n%s", shadow)
-	}
-	if !strings.Contains(shadow, "ensure violation") {
-		t.Errorf("should contain ensure violation message, got:\n%s", shadow)
-	}
-}
-
-func TestEngine_Ensure_CustomPanic(t *testing.T) {
-	dir := setupDir(t, map[string]string{
-		"main.go": `package main
-
-func SafeDiv(a, b int) int {
-	// @ensure result >= 0 panic("negative result")
-	result := a / b
-	return result
-}
-`,
-	})
-	e := NewEngine(dir)
-	e.Run()
-	shadow := readShadow(t, e)
-	if !strings.Contains(shadow, "defer func()") {
-		t.Errorf("should contain defer func(), got:\n%s", shadow)
-	}
-	if !strings.Contains(shadow, `panic("negative result")`) {
-		t.Errorf("should contain custom panic message, got:\n%s", shadow)
-	}
-}
-
-func TestEngine_Ensure_WithRequire(t *testing.T) {
-	// @ensure and @require in same function
-	dir := setupDir(t, map[string]string{
-		"main.go": `package main
-
-func Transform(s string) string {
-	// @require len(s) > 0
-	// @ensure len(result) > 0
-	result := "[" + s + "]"
-	return result
-}
-`,
-	})
-	e := NewEngine(dir)
-	e.Run()
-	shadow := readShadow(t, e)
-	// Should have both if (require) and defer (ensure)
-	if !strings.Contains(shadow, "if !(len(s) > 0)") {
-		t.Errorf("should contain require if-block, got:\n%s", shadow)
-	}
-	if !strings.Contains(shadow, "defer func()") {
-		t.Errorf("should contain ensure defer-block, got:\n%s", shadow)
-	}
-	if !strings.Contains(shadow, "!(len(result) > 0)") {
-		t.Errorf("should contain ensure condition, got:\n%s", shadow)
-	}
-}
-
-// ---------------------------------------------------------------------------
-// return action tests
-// ---------------------------------------------------------------------------
-
-func TestEngine_Require_Return(t *testing.T) {
+func TestEngine_Return(t *testing.T) {
 	dir := setupDir(t, map[string]string{
 		"main.go": `package main
 
 func Positive(x int) int {
-	// @require x > 0 return(-1)
+	// @inco: x > 0, -return(-1)
 	return x * 2
 }
 `,
@@ -779,14 +329,14 @@ func Positive(x int) int {
 	}
 }
 
-func TestEngine_Require_ReturnMultiValue(t *testing.T) {
+func TestEngine_ReturnMultiValue(t *testing.T) {
 	dir := setupDir(t, map[string]string{
 		"main.go": `package main
 
 import "fmt"
 
 func Parse(s string) (int, error) {
-	// @require len(s) > 0 return(0, fmt.Errorf("empty"))
+	// @inco: len(s) > 0, -return(0, fmt.Errorf("empty"))
 	return len(s), nil
 }
 `,
@@ -799,14 +349,14 @@ func Parse(s string) (int, error) {
 	}
 }
 
-func TestEngine_Require_ReturnBare(t *testing.T) {
+func TestEngine_ReturnBare(t *testing.T) {
 	dir := setupDir(t, map[string]string{
 		"main.go": `package main
 
 import "fmt"
 
 func Check(x int) {
-	// @require x > 0 return
+	// @inco: x > 0, -return
 	fmt.Println(x)
 }
 `,
@@ -819,54 +369,11 @@ func Check(x int) {
 	}
 }
 
-func TestEngine_Must_ReturnWithSubstitution(t *testing.T) {
-	dir := setupDir(t, map[string]string{
-		"main.go": `package main
-
-import "fmt"
-
-func Run() (string, error) {
-	_, _ = fmt.Println("hello") // @must return("", _)
-	return "ok", nil
-}
-`,
-	})
-	e := NewEngine(dir)
-	e.Run()
-	shadow := readShadow(t, e)
-	// _ should be substituted with __inco_err
-	if !strings.Contains(shadow, `return "", __inco_err`) {
-		t.Errorf("should contain return with substituted _, got:\n%s", shadow)
-	}
-}
-
-func TestEngine_Expect_Return(t *testing.T) {
-	dir := setupDir(t, map[string]string{
-		"main.go": `package main
-
-func Lookup() int {
-	m := map[string]int{"a": 1}
-	v, _ := m["a"] // @expect return(0)
-	return v
-}
-`,
-	})
-	e := NewEngine(dir)
-	e.Run()
-	shadow := readShadow(t, e)
-	if !strings.Contains(shadow, "!__inco_ok") {
-		t.Errorf("should contain !__inco_ok, got:\n%s", shadow)
-	}
-	if !strings.Contains(shadow, "return 0") {
-		t.Errorf("should contain return 0, got:\n%s", shadow)
-	}
-}
-
 // ---------------------------------------------------------------------------
-// continue action tests
+// -continue action
 // ---------------------------------------------------------------------------
 
-func TestEngine_Require_Continue(t *testing.T) {
+func TestEngine_Continue(t *testing.T) {
 	dir := setupDir(t, map[string]string{
 		"main.go": `package main
 
@@ -874,7 +381,7 @@ import "fmt"
 
 func PrintPositive(nums []int) {
 	for _, n := range nums {
-		// @require n > 0 continue
+		// @inco: n > 0, -continue
 		fmt.Println(n)
 	}
 }
@@ -891,39 +398,11 @@ func PrintPositive(nums []int) {
 	}
 }
 
-func TestEngine_Must_Continue(t *testing.T) {
-	dir := setupDir(t, map[string]string{
-		"main.go": `package main
-
-import (
-	"fmt"
-	"strconv"
-)
-
-func ParseAll(strs []string) {
-	for _, s := range strs {
-		_, _ = strconv.Atoi(s) // @must continue
-		fmt.Println(s)
-	}
-}
-`,
-	})
-	e := NewEngine(dir)
-	e.Run()
-	shadow := readShadow(t, e)
-	if !strings.Contains(shadow, "__inco_err") {
-		t.Errorf("should contain __inco_err, got:\n%s", shadow)
-	}
-	if !strings.Contains(shadow, "continue") {
-		t.Errorf("should contain continue, got:\n%s", shadow)
-	}
-}
-
 // ---------------------------------------------------------------------------
-// break action tests
+// -break action
 // ---------------------------------------------------------------------------
 
-func TestEngine_Require_Break(t *testing.T) {
+func TestEngine_Break(t *testing.T) {
 	dir := setupDir(t, map[string]string{
 		"main.go": `package main
 
@@ -931,7 +410,7 @@ import "fmt"
 
 func FindFirst(nums []int) {
 	for _, n := range nums {
-		// @require n != 42 break
+		// @inco: n != 42, -break
 		fmt.Println(n)
 	}
 }
@@ -948,26 +427,140 @@ func FindFirst(nums []int) {
 	}
 }
 
-func TestEngine_Expect_Break(t *testing.T) {
+// ---------------------------------------------------------------------------
+// Struct field comments — should NOT be processed
+// ---------------------------------------------------------------------------
+
+func TestEngine_StructFieldCommentIgnored(t *testing.T) {
 	dir := setupDir(t, map[string]string{
 		"main.go": `package main
 
-func FindKey(m map[string]int) int {
-	for _, k := range []string{"a", "b", "c"} {
-		v, _ := m[k] // @expect break
-		return v
+type Config struct {
+	Name string // @inco: not empty
+	Port int    // some comment
+}
+
+func main() {}
+`,
+	})
+	e := NewEngine(dir)
+	e.Run()
+	// Struct field inline comment is not a standalone comment line,
+	// so it should NOT produce an overlay.
+	if len(e.Overlay.Replace) != 0 {
+		t.Errorf("struct field comment should not trigger overlay, got %d entries", len(e.Overlay.Replace))
 	}
-	return -1
+}
+
+// ---------------------------------------------------------------------------
+// Multiple files — all processed
+// ---------------------------------------------------------------------------
+
+func TestEngine_MultipleFiles(t *testing.T) {
+	dir := setupDir(t, map[string]string{
+		"a.go": `package main
+
+func A(x int) {
+	// @inco: x > 0
+	_ = x
+}
+`,
+		"b.go": `package main
+
+func B(y int) {
+	// @inco: y > 0
+	_ = y
+}
+`,
+	})
+	e := NewEngine(dir)
+	e.Run()
+	if len(e.Overlay.Replace) != 2 {
+		t.Errorf("expected 2 overlay entries, got %d", len(e.Overlay.Replace))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Test files (_test.go) should be skipped
+// ---------------------------------------------------------------------------
+
+func TestEngine_SkipsTestFiles(t *testing.T) {
+	dir := setupDir(t, map[string]string{
+		"main.go":      "package main\n\nfunc main() {}\n",
+		"main_test.go": "package main\n\nfunc TestFoo() {\n\t// @inco: true\n}\n",
+	})
+	e := NewEngine(dir)
+	e.Run()
+	if len(e.Overlay.Replace) != 0 {
+		t.Errorf("should skip _test.go, got %d entries", len(e.Overlay.Replace))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Import injection — fmt.Errorf in action args
+// ---------------------------------------------------------------------------
+
+func TestEngine_ImportInjection(t *testing.T) {
+	dir := setupDir(t, map[string]string{
+		"main.go": `package main
+
+func Do(s string) (int, error) {
+	// @inco: len(s) > 0, -return(0, fmt.Errorf("empty"))
+	return len(s), nil
 }
 `,
 	})
 	e := NewEngine(dir)
 	e.Run()
 	shadow := readShadow(t, e)
-	if !strings.Contains(shadow, "!__inco_ok") {
-		t.Errorf("should contain !__inco_ok, got:\n%s", shadow)
+	if !strings.Contains(shadow, `"fmt"`) {
+		t.Errorf("should inject fmt import, got:\n%s", shadow)
 	}
-	if !strings.Contains(shadow, "break") {
-		t.Errorf("should contain break, got:\n%s", shadow)
+}
+
+// ---------------------------------------------------------------------------
+// Deeply nested closure
+// ---------------------------------------------------------------------------
+
+func TestEngine_NestedClosure(t *testing.T) {
+	dir := setupDir(t, map[string]string{
+		"main.go": `package main
+
+import "fmt"
+
+func Outer() {
+	a := func() {
+		b := func(x int) {
+			// @inco: x > 0
+			fmt.Println(x)
+		}
+		b(1)
+	}
+	a()
+}
+`,
+	})
+	e := NewEngine(dir)
+	e.Run()
+	shadow := readShadow(t, e)
+	if !strings.Contains(shadow, "!(x > 0)") {
+		t.Error("should process directive in nested closure")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Vendor / testdata directories skipped
+// ---------------------------------------------------------------------------
+
+func TestEngine_SkipsVendor(t *testing.T) {
+	dir := setupDir(t, map[string]string{
+		"main.go":        "package main\n\nfunc main() {}\n",
+		"vendor/v/v.go":  "package v\n\nfunc V(x int) {\n\t// @inco: x > 0\n}\n",
+		"testdata/td.go": "package td\n\nfunc TD(x int) {\n\t// @inco: x > 0\n}\n",
+	})
+	e := NewEngine(dir)
+	e.Run()
+	if len(e.Overlay.Replace) != 0 {
+		t.Errorf("should skip vendor/testdata, got %d entries", len(e.Overlay.Replace))
 	}
 }

@@ -10,7 +10,7 @@ type Number interface {
 // --- Case 1: Generic function with expression ---
 
 func Clamp[N Number](val, lo, hi N) N {
-	// @require lo <= hi
+	// @inco: lo <= hi
 	if val < lo {
 		return lo
 	}
@@ -20,20 +20,20 @@ func Clamp[N Number](val, lo, hi N) N {
 	return val
 }
 
-// --- Case 2: Generic container with @expect ---
+// --- Case 2: Generic container ---
 
 type Repository[T any] struct {
 	data map[string]T
 }
 
-func (r *Repository[T]) Get(id string) T {
-	v, _ := r.data[id] // @expect panic("not found: " + id)
-	return v
+func (r *Repository[T]) Get(id string) (T, bool) {
+	v, ok := r.data[id]
+	return v, ok
 }
 
-func FetchFromRepo[T any](repo *Repository[T], id string) T {
-	// @require repo != nil
-	// @require len(id) > 0
+func FetchFromRepo[T any](repo *Repository[T], id string) (T, bool) {
+	// @inco: repo != nil
+	// @inco: len(id) > 0
 
 	return repo.Get(id)
 }
@@ -46,6 +46,6 @@ type Pair[K comparable, V any] struct {
 }
 
 func NewPair[K comparable, V any](key K, value V) Pair[K, V] {
-	// @require key != *new(K) panic("key must not be zero")
+	// @inco: key != *new(K), -panic("key must not be zero")
 	return Pair[K, V]{Key: key, Value: value}
 }

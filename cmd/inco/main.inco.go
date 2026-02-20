@@ -55,7 +55,9 @@ func main() {
 		}
 	case "clean":
 		dir := getDir(2)
-		_ = os.RemoveAll(filepath.Join(dir, ".inco_cache")) // @must
+		if err := os.RemoveAll(filepath.Join(dir, ".inco_cache")); err != nil {
+			panic(err)
+		}
 		fmt.Println("inco: cache cleaned")
 	default:
 		fmt.Fprintf(os.Stderr, "inco: unknown command %q\n", os.Args[1])
@@ -64,7 +66,7 @@ func main() {
 	}
 }
 
-// guardPanic recovers from panics (including those injected by @must)
+// guardPanic recovers from panics (including those injected by @inco:)
 // and exits cleanly with the panic message.
 func guardPanic() {
 	if r := recover(); r != nil {
@@ -81,22 +83,34 @@ func getDir(argIdx int) string {
 }
 
 func runGen(dir string) {
-	absDir, _ := filepath.Abs(dir) // @must
+	absDir, err := filepath.Abs(dir)
+	if err != nil {
+		panic(err)
+	}
 	inco.NewEngine(absDir).Run()
 }
 
 func runAudit(dir string) *inco.AuditResult {
-	absDir, _ := filepath.Abs(dir) // @must
+	absDir, err := filepath.Abs(dir)
+	if err != nil {
+		panic(err)
+	}
 	return inco.Audit(absDir)
 }
 
 func runRelease(dir string) {
-	absDir, _ := filepath.Abs(dir) // @must
+	absDir, err := filepath.Abs(dir)
+	if err != nil {
+		panic(err)
+	}
 	inco.Release(absDir)
 }
 
 func runReleaseClean(dir string) {
-	absDir, _ := filepath.Abs(dir) // @must
+	absDir, err := filepath.Abs(dir)
+	if err != nil {
+		panic(err)
+	}
 	inco.ReleaseClean(absDir)
 }
 
@@ -106,7 +120,10 @@ func runGo(subcmd, dir string, extraArgs []string) {
 		execGo(subcmd, extraArgs)
 		return
 	}
-	absOverlay, _ := filepath.Abs(overlayPath) // @must
+	absOverlay, err := filepath.Abs(overlayPath)
+	if err != nil {
+		panic(err)
+	}
 	args := append([]string{fmt.Sprintf("-overlay=%s", absOverlay)}, extraArgs...)
 	execGo(subcmd, args)
 }

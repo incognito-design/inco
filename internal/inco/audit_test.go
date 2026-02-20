@@ -8,17 +8,31 @@ import (
 	"testing"
 )
 
+// writeFile is a test helper that creates a file with the given content.
+func writeFile(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Basic counts
+// ---------------------------------------------------------------------------
+
 func TestAudit_BasicCounts(t *testing.T) {
 	dir := t.TempDir()
 
-	// File with @require, @must, @expect, @ensure and native if.
 	writeFile(t, filepath.Join(dir, "main.go"), `package main
 
 import "fmt"
 
 func Guarded(x int, name string) {
-	// @require x > 0
-	// @require len(name) > 0
+	// @inco: x > 0
+	// @inco: len(name) > 0
 	if x > 10 {
 		fmt.Println("big")
 	}
@@ -32,34 +46,15 @@ func Unguarded(y int) {
 
 type DB struct{}
 func (db *DB) Query(q string) (string, error) { return "", nil }
-
-func UseMust(db *DB) {
-	_, _ = db.Query("SELECT 1") // @must
-	if true {
-		fmt.Println("logic")
-	}
-}
-
-func UseExpect() {
-	m := map[string]int{"a": 1}
-	_, _ = m["a"] // @expect
-}
-
-func UseEnsure(x int) int {
-	// @ensure result > 0
-	result := x * 2
-	return result
-}
 `)
 
 	result := Audit(dir)
 
-	// Totals.
 	if result.TotalFiles != 1 {
 		t.Errorf("TotalFiles = %d, want 1", result.TotalFiles)
 	}
-	if result.TotalFuncs != 6 { // Guarded, Unguarded, Query, UseMust, UseExpect, UseEnsure
-		t.Errorf("TotalFuncs = %d, want 6", result.TotalFuncs)
+	if result.TotalFuncs != 3 { // Guarded, Unguarded, Query
+		t.Errorf("TotalFuncs = %d, want 3", result.TotalFuncs)
 	}
 	if result.GuardedFuncs != 1 { // only Guarded
 		t.Errorf("GuardedFuncs = %d, want 1", result.GuardedFuncs)
@@ -67,22 +62,17 @@ func UseEnsure(x int) int {
 	if result.TotalRequires != 2 {
 		t.Errorf("TotalRequires = %d, want 2", result.TotalRequires)
 	}
-	if result.TotalMusts != 1 {
-		t.Errorf("TotalMusts = %d, want 1", result.TotalMusts)
+	if result.TotalDirectives != 2 {
+		t.Errorf("TotalDirectives = %d, want 2", result.TotalDirectives)
 	}
-	if result.TotalExpects != 1 {
-		t.Errorf("TotalExpects = %d, want 1", result.TotalExpects)
-	}
-	if result.TotalEnsures != 1 {
-		t.Errorf("TotalEnsures = %d, want 1", result.TotalEnsures)
-	}
-	if result.TotalDirectives != 5 {
-		t.Errorf("TotalDirectives = %d, want 5", result.TotalDirectives)
-	}
-	if result.TotalIfs != 3 { // x>10, y<0, true
-		t.Errorf("TotalIfs = %d, want 3", result.TotalIfs)
+	if result.TotalIfs != 2 { // x>10, y<0
+		t.Errorf("TotalIfs = %d, want 2", result.TotalIfs)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Multiple files
+// ---------------------------------------------------------------------------
 
 func TestAudit_MultipleFiles(t *testing.T) {
 	dir := t.TempDir()
@@ -90,7 +80,7 @@ func TestAudit_MultipleFiles(t *testing.T) {
 	writeFile(t, filepath.Join(dir, "a.go"), `package main
 
 func A(x int) {
-	// @require x > 0
+	// @inco: x > 0
 }
 
 func B(y int) {
@@ -101,7 +91,7 @@ func B(y int) {
 	writeFile(t, filepath.Join(dir, "b.go"), `package main
 
 func C(z int) {
-	// @require z != 0
+	// @inco: z != 0
 	if z > 100 {}
 }
 `)
@@ -125,20 +115,24 @@ func C(z int) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// Skips hidden dirs and test files
+// ---------------------------------------------------------------------------
+
 func TestAudit_SkipsHiddenAndTestFiles(t *testing.T) {
 	dir := t.TempDir()
 
 	writeFile(t, filepath.Join(dir, "main.go"), `package main
 
 func X(a int) {
-	// @require a > 0
+	// @inco: a > 0
 }
 `)
 	// Test file — should be skipped.
 	writeFile(t, filepath.Join(dir, "main_test.go"), `package main
 
 func TestX() {
-	// @require true
+	// @inco: true
 }
 `)
 	// Hidden dir — should be skipped.
@@ -147,7 +141,7 @@ func TestX() {
 	writeFile(t, filepath.Join(hidden, "cached.go"), `package cache
 
 func Y(b int) {
-	// @require b > 0
+	// @inco: b > 0
 }
 `)
 
@@ -161,15 +155,19 @@ func Y(b int) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// Closures counted as functions
+// ---------------------------------------------------------------------------
+
 func TestAudit_ClosureCounted(t *testing.T) {
 	dir := t.TempDir()
 
 	writeFile(t, filepath.Join(dir, "main.go"), `package main
 
 func Outer() {
-	// @require true
+	// @inco: true
 	inner := func(x int) {
-		// @require x > 0
+		// @inco: x > 0
 	}
 	_ = inner
 }
@@ -184,6 +182,10 @@ func Outer() {
 		t.Errorf("GuardedFuncs = %d, want 2", result.GuardedFuncs)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Empty project
+// ---------------------------------------------------------------------------
 
 func TestAudit_EmptyProject(t *testing.T) {
 	dir := t.TempDir()
@@ -206,6 +208,10 @@ func main() {}
 	}
 }
 
+// ---------------------------------------------------------------------------
+// Method receiver
+// ---------------------------------------------------------------------------
+
 func TestAudit_MethodReceiver(t *testing.T) {
 	dir := t.TempDir()
 
@@ -214,7 +220,7 @@ func TestAudit_MethodReceiver(t *testing.T) {
 type Svc struct{}
 
 func (s *Svc) Do(x int) {
-	// @require x > 0
+	// @inco: x > 0
 }
 `)
 
@@ -226,7 +232,6 @@ func (s *Svc) Do(x int) {
 	if result.GuardedFuncs != 1 {
 		t.Errorf("GuardedFuncs = %d, want 1", result.GuardedFuncs)
 	}
-
 	if len(result.Files) != 1 || len(result.Files[0].Funcs) != 1 {
 		t.Fatal("unexpected file/func count")
 	}
@@ -235,6 +240,10 @@ func (s *Svc) Do(x int) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// PrintReport
+// ---------------------------------------------------------------------------
+
 func TestAudit_PrintReport(t *testing.T) {
 	r := &AuditResult{
 		TotalFiles:      2,
@@ -242,14 +251,11 @@ func TestAudit_PrintReport(t *testing.T) {
 		GuardedFuncs:    3,
 		TotalIfs:        10,
 		TotalRequires:   4,
-		TotalMusts:      2,
-		TotalExpects:    1,
-		TotalEnsures:    1,
-		TotalDirectives: 8,
+		TotalDirectives: 4,
 		Files: []FileAudit{
-			{RelPath: "a.go", RequireCount: 3, MustCount: 1, ExpectCount: 0, IfCount: 6,
+			{RelPath: "a.go", RequireCount: 3, IfCount: 6,
 				Funcs: []FuncAudit{{Name: "A", Line: 3, RequireCount: 2}, {Name: "B", Line: 8, RequireCount: 1}}},
-			{RelPath: "b.go", RequireCount: 1, MustCount: 1, ExpectCount: 1, IfCount: 4,
+			{RelPath: "b.go", RequireCount: 1, IfCount: 4,
 				Funcs: []FuncAudit{{Name: "C", Line: 3, RequireCount: 0}, {Name: "D", Line: 8, RequireCount: 0}, {Name: "E", Line: 13, RequireCount: 1}}},
 		},
 	}
@@ -258,24 +264,20 @@ func TestAudit_PrintReport(t *testing.T) {
 	r.PrintReport(&buf)
 	out := buf.String()
 
-	// Check key sections are present.
 	for _, want := range []string{
 		"contract coverage report",
-		"@require coverage:",
+		"@inco: coverage:",
 		"3 / 5",
 		"60.0%",
 		"Directive vs if:",
-		"@require:",
-		"@must:",
-		"@expect:",
-		"@ensure:",
+		"@inco:",
 		"Total directives:",
 		"Native if stmts:",
-		"0.80",
+		"0.40",
 		"Per-file breakdown:",
 		"a.go",
 		"b.go",
-		"Functions without @require",
+		"Functions without @inco:",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("report missing %q\n\nFull output:\n%s", want, out)
@@ -283,12 +285,29 @@ func TestAudit_PrintReport(t *testing.T) {
 	}
 }
 
-func writeFile(t *testing.T, path, content string) {
-	t.Helper()
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatal(err)
+// ---------------------------------------------------------------------------
+// Directive with action — still counted as @inco:
+// ---------------------------------------------------------------------------
+
+func TestAudit_DirectiveWithAction(t *testing.T) {
+	dir := t.TempDir()
+
+	writeFile(t, filepath.Join(dir, "main.go"), `package main
+
+import "fmt"
+
+func Check(x int) {
+	// @inco: x > 0, -return
+	fmt.Println(x)
+}
+`)
+
+	result := Audit(dir)
+
+	if result.TotalRequires != 1 {
+		t.Errorf("TotalRequires = %d, want 1", result.TotalRequires)
 	}
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-		t.Fatal(err)
+	if result.TotalDirectives != 1 {
+		t.Errorf("TotalDirectives = %d, want 1", result.TotalDirectives)
 	}
 }

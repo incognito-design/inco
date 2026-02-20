@@ -1,70 +1,23 @@
 package inco
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+)
 
-func TestParseDirective_ExprOnly(t *testing.T) {
-	// No action keyword → default panic.
-	d := ParseDirective("// @require x > 0")
-	if d == nil {
-		t.Fatal("expected directive")
-	}
-	if d.Action != ActionPanic {
-		t.Errorf("Action = %v, want Panic", d.Action)
-	}
-	if d.Expr != "x > 0" {
-		t.Errorf("Expr = %q, want %q", d.Expr, "x > 0")
-	}
-	if len(d.ActionArgs) != 0 {
-		t.Errorf("ActionArgs = %v, want empty", d.ActionArgs)
-	}
-}
+// ---------------------------------------------------------------------------
+// ParseDirective — basic recognition
+// ---------------------------------------------------------------------------
 
-func TestParseDirective_PanicExplicit(t *testing.T) {
-	d := ParseDirective("// @require x != nil panic")
-	if d == nil {
-		t.Fatal("nil")
-	}
-	if d.Action != ActionPanic {
-		t.Errorf("Action = %v", d.Action)
-	}
-	if d.Expr != "x != nil" {
-		t.Errorf("Expr = %q", d.Expr)
-	}
-}
-
-func TestParseDirective_PanicWithMessage(t *testing.T) {
-	d := ParseDirective(`// @require x > 0 panic("bad input")`)
-	if d == nil {
-		t.Fatal("nil")
-	}
-	if d.Action != ActionPanic {
-		t.Errorf("Action = %v", d.Action)
-	}
-	if len(d.ActionArgs) != 1 || d.ActionArgs[0] != `"bad input"` {
-		t.Errorf("ActionArgs = %v", d.ActionArgs)
-	}
-	if d.Expr != "x > 0" {
-		t.Errorf("Expr = %q", d.Expr)
-	}
-}
-
-func TestParseDirective_BlockComment(t *testing.T) {
-	d := ParseDirective("/* @require x > 0 panic */")
-	if d == nil {
-		t.Fatal("nil")
-	}
-	if d.Action != ActionPanic {
-		t.Errorf("Action = %v", d.Action)
-	}
-}
-
-func TestParseDirective_NotDirective(t *testing.T) {
+func TestParseDirective_Nil(t *testing.T) {
 	for _, input := range []string{
-		"// regular comment",
-		"// @unknown foo",
-		"x + y",
 		"",
-		"// @require", // no expression
+		"// just a comment",
+		"// @inco",     // missing colon
+		"// @inco:",    // no expression
+		"// @inco:   ", // whitespace only
+		"/* block comment */",
+		"// @INCO: x > 0", // wrong case
 	} {
 		if d := ParseDirective(input); d != nil {
 			t.Errorf("ParseDirective(%q) = %+v, want nil", input, d)
@@ -72,343 +25,284 @@ func TestParseDirective_NotDirective(t *testing.T) {
 	}
 }
 
-// --- @must tests ---
-
-func TestParseDirective_MustBare(t *testing.T) {
-	d := ParseDirective("// @must")
+func TestParseDirective_ExprOnly(t *testing.T) {
+	d := ParseDirective("// @inco: x > 0")
 	if d == nil {
-		t.Fatal("nil")
-	}
-	if d.Kind != KindMust {
-		t.Errorf("Kind = %v, want Must", d.Kind)
-	}
-	if d.Action != ActionPanic {
-		t.Errorf("Action = %v, want Panic", d.Action)
-	}
-}
-
-func TestParseDirective_MustPanicMsg(t *testing.T) {
-	d := ParseDirective(`// @must panic("db error")`)
-	if d == nil {
-		t.Fatal("nil")
-	}
-	if d.Kind != KindMust {
-		t.Errorf("Kind = %v", d.Kind)
-	}
-	if d.Action != ActionPanic {
-		t.Errorf("Action = %v", d.Action)
-	}
-	if len(d.ActionArgs) != 1 || d.ActionArgs[0] != `"db error"` {
-		t.Errorf("ActionArgs = %v", d.ActionArgs)
-	}
-}
-
-// --- @expect tests ---
-
-func TestParseDirective_ExpectBare(t *testing.T) {
-	d := ParseDirective("// @expect")
-	if d == nil {
-		t.Fatal("nil")
-	}
-	if d.Kind != KindExpect {
-		t.Errorf("Kind = %v, want Expect", d.Kind)
-	}
-	if d.Action != ActionPanic {
-		t.Errorf("Action = %v, want Panic", d.Action)
-	}
-}
-
-func TestParseDirective_ExpectPanicMsg(t *testing.T) {
-	d := ParseDirective(`// @expect panic("key missing")`)
-	if d == nil {
-		t.Fatal("nil")
-	}
-	if d.Kind != KindExpect {
-		t.Errorf("Kind = %v", d.Kind)
-	}
-	if d.Action != ActionPanic {
-		t.Errorf("Action = %v", d.Action)
-	}
-	if len(d.ActionArgs) != 1 || d.ActionArgs[0] != `"key missing"` {
-		t.Errorf("ActionArgs = %v", d.ActionArgs)
-	}
-}
-
-func TestParseDirective_NotKeywordPrefix(t *testing.T) {
-	// "panicHandler" should NOT match action "panic".
-	d := ParseDirective("// @require panicHandler != nil")
-	if d == nil {
-		t.Fatal("nil")
-	}
-	// No action matched → default panic; entire string is expression.
-	if d.Action != ActionPanic {
-		t.Errorf("Action = %v, want Panic", d.Action)
-	}
-	if d.Expr != "panicHandler != nil" {
-		t.Errorf("Expr = %q", d.Expr)
-	}
-}
-
-func TestSplitTopLevel(t *testing.T) {
-	tests := []struct {
-		input string
-		want  []string
-	}{
-		{"a, b, c", []string{"a", "b", "c"}},
-		{`nil, fmt.Errorf("x: %s", id)`, []string{"nil", `fmt.Errorf("x: %s", id)`}},
-		{"single", []string{"single"}},
-		{`"hello, world"`, []string{`"hello, world"`}},
-		{"f(a, b), g(c)", []string{"f(a, b)", "g(c)"}},
-	}
-	for _, tt := range tests {
-		got := splitTopLevel(tt.input)
-		if len(got) != len(tt.want) {
-			t.Errorf("splitTopLevel(%q) = %v, want %v", tt.input, got, tt.want)
-			continue
-		}
-		for i := range got {
-			if got[i] != tt.want[i] {
-				t.Errorf("splitTopLevel(%q)[%d] = %q, want %q", tt.input, i, got[i], tt.want[i])
-			}
-		}
-	}
-}
-
-func TestActionKindString(t *testing.T) {
-	tests := []struct {
-		k    ActionKind
-		want string
-	}{
-		{ActionPanic, "panic"},
-		{ActionKind(99), "unknown"},
-	}
-	for _, tt := range tests {
-		if got := tt.k.String(); got != tt.want {
-			t.Errorf("ActionKind(%d).String() = %q, want %q", tt.k, got, tt.want)
-		}
-	}
-}
-
-// --- @ensure tests ---
-
-func TestParseDirective_EnsureBare(t *testing.T) {
-	d := ParseDirective("// @ensure len(result) > 0")
-	if d == nil {
-		t.Fatal("nil")
-	}
-	if d.Kind != KindEnsure {
-		t.Errorf("Kind = %v, want Ensure", d.Kind)
-	}
-	if d.Expr != "len(result) > 0" {
-		t.Errorf("Expr = %q", d.Expr)
-	}
-	if d.Action != ActionPanic {
-		t.Errorf("Action = %v, want Panic", d.Action)
-	}
-}
-
-func TestParseDirective_EnsurePanicMsg(t *testing.T) {
-	d := ParseDirective(`// @ensure result != nil panic("postcondition failed")`)
-	if d == nil {
-		t.Fatal("nil")
-	}
-	if d.Kind != KindEnsure {
-		t.Errorf("Kind = %v", d.Kind)
-	}
-	if d.Expr != "result != nil" {
-		t.Errorf("Expr = %q", d.Expr)
-	}
-	if len(d.ActionArgs) != 1 || d.ActionArgs[0] != `"postcondition failed"` {
-		t.Errorf("ActionArgs = %v", d.ActionArgs)
-	}
-}
-
-func TestParseDirective_EnsureNoExpr(t *testing.T) {
-	// @ensure with no expression is invalid
-	d := ParseDirective("// @ensure")
-	if d != nil {
-		t.Errorf("expected nil for bare @ensure, got %+v", d)
-	}
-}
-
-// --- return action tests ---
-
-func TestParseDirective_RequireReturn(t *testing.T) {
-	d := ParseDirective("// @require x > 0 return")
-	if d == nil {
-		t.Fatal("nil")
-	}
-	if d.Action != ActionReturn {
-		t.Errorf("Action = %v, want Return", d.Action)
+		t.Fatal("got nil")
 	}
 	if d.Expr != "x > 0" {
-		t.Errorf("Expr = %q", d.Expr)
+		t.Errorf("Expr = %q, want %q", d.Expr, "x > 0")
+	}
+	if d.Action != ActionPanic {
+		t.Errorf("Action = %v, want ActionPanic", d.Action)
 	}
 	if len(d.ActionArgs) != 0 {
 		t.Errorf("ActionArgs = %v, want empty", d.ActionArgs)
 	}
 }
 
-func TestParseDirective_RequireReturnWithArgs(t *testing.T) {
-	d := ParseDirective(`// @require x > 0 return(0, fmt.Errorf("bad x"))`)
+func TestParseDirective_FuncCallExpr(t *testing.T) {
+	d := ParseDirective("// @inco: len(name) > 0")
 	if d == nil {
-		t.Fatal("nil")
+		t.Fatal("got nil")
 	}
-	if d.Action != ActionReturn {
-		t.Errorf("Action = %v, want Return", d.Action)
-	}
-	if d.Expr != "x > 0" {
-		t.Errorf("Expr = %q", d.Expr)
-	}
-	if len(d.ActionArgs) != 2 {
-		t.Fatalf("ActionArgs len = %d, want 2: %v", len(d.ActionArgs), d.ActionArgs)
-	}
-	if d.ActionArgs[0] != "0" {
-		t.Errorf("ActionArgs[0] = %q, want %q", d.ActionArgs[0], "0")
-	}
-	if d.ActionArgs[1] != `fmt.Errorf("bad x")` {
-		t.Errorf("ActionArgs[1] = %q", d.ActionArgs[1])
-	}
-}
-
-func TestParseDirective_MustReturn(t *testing.T) {
-	d := ParseDirective("// @must return(nil, _)")
-	if d == nil {
-		t.Fatal("nil")
-	}
-	if d.Kind != KindMust {
-		t.Errorf("Kind = %v, want Must", d.Kind)
-	}
-	if d.Action != ActionReturn {
-		t.Errorf("Action = %v, want Return", d.Action)
-	}
-	if len(d.ActionArgs) != 2 || d.ActionArgs[0] != "nil" || d.ActionArgs[1] != "_" {
-		t.Errorf("ActionArgs = %v", d.ActionArgs)
-	}
-}
-
-func TestParseDirective_ExpectReturn(t *testing.T) {
-	d := ParseDirective("// @expect return")
-	if d == nil {
-		t.Fatal("nil")
-	}
-	if d.Kind != KindExpect {
-		t.Errorf("Kind = %v, want Expect", d.Kind)
-	}
-	if d.Action != ActionReturn {
-		t.Errorf("Action = %v, want Return", d.Action)
-	}
-}
-
-// --- continue action tests ---
-
-func TestParseDirective_RequireContinue(t *testing.T) {
-	d := ParseDirective("// @require x > 0 continue")
-	if d == nil {
-		t.Fatal("nil")
-	}
-	if d.Action != ActionContinue {
-		t.Errorf("Action = %v, want Continue", d.Action)
-	}
-	if d.Expr != "x > 0" {
+	if d.Expr != "len(name) > 0" {
 		t.Errorf("Expr = %q", d.Expr)
 	}
 }
 
-func TestParseDirective_MustContinue(t *testing.T) {
-	d := ParseDirective("// @must continue")
+// ---------------------------------------------------------------------------
+// Actions — comma+dash syntax
+// ---------------------------------------------------------------------------
+
+func TestParseDirective_PanicBare(t *testing.T) {
+	d := ParseDirective("// @inco: x > 0, -panic")
 	if d == nil {
-		t.Fatal("nil")
-	}
-	if d.Kind != KindMust {
-		t.Errorf("Kind = %v", d.Kind)
-	}
-	if d.Action != ActionContinue {
-		t.Errorf("Action = %v, want Continue", d.Action)
-	}
-}
-
-func TestParseDirective_ExpectContinue(t *testing.T) {
-	d := ParseDirective("// @expect continue")
-	if d == nil {
-		t.Fatal("nil")
-	}
-	if d.Kind != KindExpect {
-		t.Errorf("Kind = %v", d.Kind)
-	}
-	if d.Action != ActionContinue {
-		t.Errorf("Action = %v, want Continue", d.Action)
-	}
-}
-
-// --- break action tests ---
-
-func TestParseDirective_RequireBreak(t *testing.T) {
-	d := ParseDirective("// @require x > 0 break")
-	if d == nil {
-		t.Fatal("nil")
-	}
-	if d.Action != ActionBreak {
-		t.Errorf("Action = %v, want Break", d.Action)
-	}
-	if d.Expr != "x > 0" {
-		t.Errorf("Expr = %q", d.Expr)
-	}
-}
-
-func TestParseDirective_MustBreak(t *testing.T) {
-	d := ParseDirective("// @must break")
-	if d == nil {
-		t.Fatal("nil")
-	}
-	if d.Kind != KindMust {
-		t.Errorf("Kind = %v", d.Kind)
-	}
-	if d.Action != ActionBreak {
-		t.Errorf("Action = %v, want Break", d.Action)
-	}
-}
-
-func TestParseDirective_ExpectBreak(t *testing.T) {
-	d := ParseDirective("// @expect break")
-	if d == nil {
-		t.Fatal("nil")
-	}
-	if d.Kind != KindExpect {
-		t.Errorf("Kind = %v", d.Kind)
-	}
-	if d.Action != ActionBreak {
-		t.Errorf("Action = %v, want Break", d.Action)
-	}
-}
-
-// --- edge: keyword-like identifiers should not match ---
-
-func TestParseDirective_ReturnInExpr(t *testing.T) {
-	// "returnValue" should not match "return" action
-	d := ParseDirective("// @require returnValue > 0")
-	if d == nil {
-		t.Fatal("nil")
+		t.Fatal("got nil")
 	}
 	if d.Action != ActionPanic {
-		t.Errorf("Action = %v, want Panic (default)", d.Action)
+		t.Errorf("Action = %v, want ActionPanic", d.Action)
 	}
-	if d.Expr != "returnValue > 0" {
+	if d.Expr != "x > 0" {
 		t.Errorf("Expr = %q", d.Expr)
 	}
 }
 
-func TestParseDirective_ContinueInExpr(t *testing.T) {
-	// "shouldContinue" ending with "continue" won't match because
-	// we search for " continue" (with space prefix).
-	d := ParseDirective("// @require shouldContinue")
+func TestParseDirective_PanicWithMessage(t *testing.T) {
+	d := ParseDirective(`// @inco: x > 0, -panic("x must be positive")`)
 	if d == nil {
-		t.Fatal("nil")
+		t.Fatal("got nil")
 	}
 	if d.Action != ActionPanic {
-		t.Errorf("Action = %v, want Panic", d.Action)
+		t.Errorf("Action = %v", d.Action)
 	}
-	if d.Expr != "shouldContinue" {
+	want := []string{`"x must be positive"`}
+	if !reflect.DeepEqual(d.ActionArgs, want) {
+		t.Errorf("ActionArgs = %v, want %v", d.ActionArgs, want)
+	}
+}
+
+func TestParseDirective_PanicFmtSprintf(t *testing.T) {
+	d := ParseDirective(`// @inco: x > 0, -panic(fmt.Sprintf("bad: %d", x))`)
+	if d == nil {
+		t.Fatal("got nil")
+	}
+	if d.Action != ActionPanic {
+		t.Errorf("Action = %v", d.Action)
+	}
+	want := []string{`fmt.Sprintf("bad: %d", x)`}
+	if !reflect.DeepEqual(d.ActionArgs, want) {
+		t.Errorf("ActionArgs = %v, want %v", d.ActionArgs, want)
+	}
+}
+
+func TestParseDirective_ReturnBare(t *testing.T) {
+	d := ParseDirective("// @inco: x > 0, -return")
+	if d == nil {
+		t.Fatal("got nil")
+	}
+	if d.Action != ActionReturn {
+		t.Errorf("Action = %v, want ActionReturn", d.Action)
+	}
+	if len(d.ActionArgs) != 0 {
+		t.Errorf("ActionArgs = %v, want empty", d.ActionArgs)
+	}
+}
+
+func TestParseDirective_ReturnSingleValue(t *testing.T) {
+	d := ParseDirective("// @inco: x > 0, -return(-1)")
+	if d == nil {
+		t.Fatal("got nil")
+	}
+	if d.Action != ActionReturn {
+		t.Errorf("Action = %v", d.Action)
+	}
+	want := []string{"-1"}
+	if !reflect.DeepEqual(d.ActionArgs, want) {
+		t.Errorf("ActionArgs = %v, want %v", d.ActionArgs, want)
+	}
+}
+
+func TestParseDirective_ReturnMultiValue(t *testing.T) {
+	d := ParseDirective(`// @inco: len(s) > 0, -return(0, fmt.Errorf("empty"))`)
+	if d == nil {
+		t.Fatal("got nil")
+	}
+	if d.Action != ActionReturn {
+		t.Errorf("Action = %v", d.Action)
+	}
+	want := []string{"0", `fmt.Errorf("empty")`}
+	if !reflect.DeepEqual(d.ActionArgs, want) {
+		t.Errorf("ActionArgs = %v, want %v", d.ActionArgs, want)
+	}
+	if d.Expr != "len(s) > 0" {
 		t.Errorf("Expr = %q", d.Expr)
+	}
+}
+
+func TestParseDirective_Continue(t *testing.T) {
+	d := ParseDirective("// @inco: n > 0, -continue")
+	if d == nil {
+		t.Fatal("got nil")
+	}
+	if d.Action != ActionContinue {
+		t.Errorf("Action = %v, want ActionContinue", d.Action)
+	}
+	if d.Expr != "n > 0" {
+		t.Errorf("Expr = %q", d.Expr)
+	}
+}
+
+func TestParseDirective_Break(t *testing.T) {
+	d := ParseDirective("// @inco: n != 42, -break")
+	if d == nil {
+		t.Fatal("got nil")
+	}
+	if d.Action != ActionBreak {
+		t.Errorf("Action = %v, want ActionBreak", d.Action)
+	}
+	if d.Expr != "n != 42" {
+		t.Errorf("Expr = %q", d.Expr)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Edge cases — comma inside expression
+// ---------------------------------------------------------------------------
+
+func TestParseDirective_CommaInFuncCallIsNotAction(t *testing.T) {
+	// The comma inside foo(a, b) should NOT be treated as an action separator.
+	d := ParseDirective("// @inco: foo(a, b) > 0")
+	if d == nil {
+		t.Fatal("got nil")
+	}
+	if d.Expr != "foo(a, b) > 0" {
+		t.Errorf("Expr = %q, want %q", d.Expr, "foo(a, b) > 0")
+	}
+	if d.Action != ActionPanic {
+		t.Errorf("Action = %v, want ActionPanic", d.Action)
+	}
+}
+
+func TestParseDirective_CommaInFuncCallWithAction(t *testing.T) {
+	d := ParseDirective(`// @inco: foo(a, b) > 0, -panic("bad")`)
+	if d == nil {
+		t.Fatal("got nil")
+	}
+	if d.Expr != "foo(a, b) > 0" {
+		t.Errorf("Expr = %q", d.Expr)
+	}
+	if d.Action != ActionPanic {
+		t.Errorf("Action = %v", d.Action)
+	}
+	want := []string{`"bad"`}
+	if !reflect.DeepEqual(d.ActionArgs, want) {
+		t.Errorf("ActionArgs = %v, want %v", d.ActionArgs, want)
+	}
+}
+
+func TestParseDirective_MapLiteralComma(t *testing.T) {
+	// m[k] is not depth-tracked by parens, but this should still be expr-only.
+	d := ParseDirective("// @inco: m[k] > 0")
+	if d == nil {
+		t.Fatal("got nil")
+	}
+	if d.Expr != "m[k] > 0" {
+		t.Errorf("Expr = %q", d.Expr)
+	}
+}
+
+func TestParseDirective_NestedParenComma(t *testing.T) {
+	d := ParseDirective("// @inco: f(g(a, b), c) != nil, -return(-1)")
+	if d == nil {
+		t.Fatal("got nil")
+	}
+	if d.Expr != "f(g(a, b), c) != nil" {
+		t.Errorf("Expr = %q", d.Expr)
+	}
+	if d.Action != ActionReturn {
+		t.Errorf("Action = %v", d.Action)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Block comment form
+// ---------------------------------------------------------------------------
+
+func TestParseDirective_BlockComment(t *testing.T) {
+	d := ParseDirective("/* @inco: x > 0 */")
+	if d == nil {
+		t.Fatal("got nil")
+	}
+	if d.Expr != "x > 0" {
+		t.Errorf("Expr = %q", d.Expr)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// stripComment helper
+// ---------------------------------------------------------------------------
+
+func TestStripComment(t *testing.T) {
+	cases := []struct {
+		input, want string
+	}{
+		{"// hello", "hello"},
+		{"//hello", "hello"},
+		{"/* block */", "block"},
+		{"  // spaced  ", "spaced"},
+		{"not a comment", ""},
+	}
+	for _, c := range cases {
+		got := stripComment(c.input)
+		if got != c.want {
+			t.Errorf("stripComment(%q) = %q, want %q", c.input, got, c.want)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// splitTopLevel helper
+// ---------------------------------------------------------------------------
+
+func TestSplitTopLevel(t *testing.T) {
+	cases := []struct {
+		input string
+		want  []string
+	}{
+		{"a, b, c", []string{"a", "b", "c"}},
+		{`f(x, y), z`, []string{"f(x, y)", "z"}},
+		{`"a,b", c`, []string{`"a,b"`, "c"}},
+		{"single", []string{"single"}},
+		{"", nil},
+	}
+	for _, c := range cases {
+		got := splitTopLevel(c.input)
+		if !reflect.DeepEqual(got, c.want) {
+			t.Errorf("splitTopLevel(%q) = %v, want %v", c.input, got, c.want)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// findLastTopLevelComma
+// ---------------------------------------------------------------------------
+
+func TestFindLastTopLevelComma(t *testing.T) {
+	cases := []struct {
+		input string
+		want  int
+	}{
+		{"a, b, c", 4},
+		{"f(a, b), c", 7},
+		{`"a,b", c`, 5},
+		{"no comma", -1},
+		{"(a, b)", -1}, // comma inside parens, not top-level
+	}
+	for _, c := range cases {
+		got := findLastTopLevelComma(c.input)
+		if got != c.want {
+			t.Errorf("findLastTopLevelComma(%q) = %d, want %d", c.input, got, c.want)
+		}
 	}
 }

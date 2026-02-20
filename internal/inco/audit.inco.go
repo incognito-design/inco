@@ -29,10 +29,7 @@ type FileAudit struct {
 	RelPath      string      // relative to root
 	Funcs        []FuncAudit // declared functions
 	IfCount      int         // native if statements
-	RequireCount int         // require directives
-	MustCount    int         // must directives
-	ExpectCount  int         // expect directives
-	EnsureCount  int         // ensure directives (defer)
+	RequireCount int         // @inco: directives
 }
 
 // AuditResult is the aggregate report.
@@ -40,12 +37,9 @@ type AuditResult struct {
 	Files           []FileAudit
 	TotalFiles      int
 	TotalFuncs      int
-	GuardedFuncs    int // functions with >= 1 require directive
+	GuardedFuncs    int // functions with >= 1 @inco: directive
 	TotalIfs        int
 	TotalRequires   int
-	TotalMusts      int
-	TotalExpects    int
-	TotalEnsures    int
 	TotalDirectives int
 }
 
@@ -54,16 +48,19 @@ type AuditResult struct {
 // ---------------------------------------------------------------------------
 
 // Audit scans all Go source files under root and produces an AuditResult
-// summarising @require coverage and directive-vs-if ratios.
+// summarising @inco: coverage and directive-vs-if ratios.
 func Audit(root string) *AuditResult {
-	// @require root != "" panic("Audit: root must not be empty")
-	absRoot, _ := filepath.Abs(root) // @must
+	// @inco: root != "", -panic("Audit: root must not be empty")
+	absRoot, err := filepath.Abs(root)
+	if err != nil {
+		panic(err)
+	}
 
 	fset := token.NewFileSet()
 	var files []FileAudit
 
 	walkFn := func(path string, d os.DirEntry, err error) error {
-		// @require err == nil panic(err)
+		// @inco: err == nil, -panic(err)
 		if d.IsDir() {
 			name := d.Name()
 			if strings.HasPrefix(name, ".") || name == "vendor" || name == "testdata" {
@@ -80,7 +77,9 @@ func Audit(root string) *AuditResult {
 		files = append(files, fa)
 		return nil
 	}
-	_ = filepath.WalkDir(absRoot, walkFn) // @must
+	if err := filepath.WalkDir(absRoot, walkFn); err != nil {
+		panic(err)
+	}
 
 	sort.Slice(files, func(i, j int) bool { return files[i].RelPath < files[j].RelPath })
 
@@ -88,9 +87,6 @@ func Audit(root string) *AuditResult {
 	for _, f := range files {
 		r.TotalIfs += f.IfCount
 		r.TotalRequires += f.RequireCount
-		r.TotalMusts += f.MustCount
-		r.TotalExpects += f.ExpectCount
-		r.TotalEnsures += f.EnsureCount
 		for _, fn := range f.Funcs {
 			r.TotalFuncs++
 			if fn.RequireCount > 0 {
@@ -98,7 +94,7 @@ func Audit(root string) *AuditResult {
 			}
 		}
 	}
-	r.TotalDirectives = r.TotalRequires + r.TotalMusts + r.TotalExpects + r.TotalEnsures
+	r.TotalDirectives = r.TotalRequires
 	return r
 }
 
@@ -107,7 +103,10 @@ func Audit(root string) *AuditResult {
 // ---------------------------------------------------------------------------
 
 func auditFile(fset *token.FileSet, root, path string) FileAudit {
-	f, _ := parser.ParseFile(fset, path, nil, parser.ParseComments) // @must
+	f, err := parser.ParseFile(fset, path, nil, parser.ParseComments)
+	if err != nil {
+		panic(err)
+	}
 
 	relPath := path
 	if rel, e := filepath.Rel(root, path); e == nil {
@@ -117,13 +116,15 @@ func auditFile(fset *token.FileSet, root, path string) FileAudit {
 	fa := FileAudit{Path: path, RelPath: relPath}
 
 	// Read source lines once for classification.
-	src, _ := os.ReadFile(path) // @must
+	src, err := os.ReadFile(path)
+	if err != nil {
+		panic(err)
+	}
 	srcLines := strings.Split(string(src), "\n")
 
-	// 1. Parse directives from comments.
+	// 1. Parse directives from comments (only standalone @inco:).
 	type directiveInfo struct {
-		kind DirectiveKind
-		pos  token.Pos
+		pos token.Pos
 	}
 	var directives []directiveInfo
 
@@ -133,32 +134,15 @@ func auditFile(fset *token.FileSet, root, path string) FileAudit {
 			if d == nil {
 				continue
 			}
-			// Classify: same as engine — standalone @require/@ensure vs inline @must/@expect.
 			line := fset.Position(c.Pos()).Line
 			if line < 1 || line > len(srcLines) {
 				continue
 			}
 			trimmed := strings.TrimSpace(srcLines[line-1])
 			isStandalone := strings.HasPrefix(trimmed, "//") || strings.HasPrefix(trimmed, "/*")
-
-			switch d.Kind {
-			case KindRequire:
-				if isStandalone {
-					fa.RequireCount++
-					directives = append(directives, directiveInfo{kind: KindRequire, pos: c.Pos()})
-				}
-			case KindEnsure:
-				if isStandalone {
-					fa.EnsureCount++
-				}
-			case KindMust:
-				if !isStandalone {
-					fa.MustCount++
-				}
-			case KindExpect:
-				if !isStandalone {
-					fa.ExpectCount++
-				}
+			if isStandalone {
+				fa.RequireCount++
+				directives = append(directives, directiveInfo{pos: c.Pos()})
 			}
 		}
 	}
@@ -171,7 +155,7 @@ func auditFile(fset *token.FileSet, root, path string) FileAudit {
 		return true
 	})
 
-	// 3. Collect functions and map @require to enclosing function.
+	// 3. Collect functions and map @inco: to enclosing function.
 	type funcRange struct {
 		name  string
 		line  int
@@ -208,12 +192,9 @@ func auditFile(fset *token.FileSet, root, path string) FileAudit {
 		return true
 	})
 
-	// Map each @require to its enclosing function.
+	// Map each @inco: to its enclosing function.
 	requireCounts := make(map[int]int) // funcRanges index → count
 	for _, d := range directives {
-		if d.kind != KindRequire {
-			continue
-		}
 		// Find innermost enclosing function.
 		bestIdx := -1
 		for i, fr := range funcRanges {
@@ -266,12 +247,12 @@ func (r *AuditResult) PrintReport(w io.Writer) {
 	fmt.Fprintf(w, "  Files scanned:  %d\n", r.TotalFiles)
 	fmt.Fprintf(w, "  Functions:      %d\n\n", r.TotalFuncs)
 
-	// --- @require coverage ---
-	fmt.Fprintf(w, "@require coverage:\n")
+	// --- @inco: coverage ---
+	fmt.Fprintf(w, "@inco: coverage:\n")
 	if r.TotalFuncs > 0 {
 		pct := float64(r.GuardedFuncs) / float64(r.TotalFuncs) * 100
-		fmt.Fprintf(w, "  With @require:     %d / %d  (%.1f%%)\n", r.GuardedFuncs, r.TotalFuncs, pct)
-		fmt.Fprintf(w, "  Without @require:  %d / %d  (%.1f%%)\n\n",
+		fmt.Fprintf(w, "  With @inco::     %d / %d  (%.1f%%)\n", r.GuardedFuncs, r.TotalFuncs, pct)
+		fmt.Fprintf(w, "  Without @inco::  %d / %d  (%.1f%%)\n\n",
 			r.TotalFuncs-r.GuardedFuncs, r.TotalFuncs, 100-pct)
 	} else {
 		fmt.Fprintf(w, "  (no functions found)\n\n")
@@ -279,10 +260,7 @@ func (r *AuditResult) PrintReport(w io.Writer) {
 
 	// --- Directive vs if ---
 	fmt.Fprintf(w, "Directive vs if:\n")
-	fmt.Fprintf(w, "  @require:           %d\n", r.TotalRequires)
-	fmt.Fprintf(w, "  @must:              %d\n", r.TotalMusts)
-	fmt.Fprintf(w, "  @expect:            %d\n", r.TotalExpects)
-	fmt.Fprintf(w, "  @ensure:            %d\n", r.TotalEnsures)
+	fmt.Fprintf(w, "  @inco::           %d\n", r.TotalRequires)
 	fmt.Fprintf(w, "  ─────────────────────\n")
 	fmt.Fprintf(w, "  Total directives:   %d\n", r.TotalDirectives)
 	fmt.Fprintf(w, "  Native if stmts:    %d\n", r.TotalIfs)
@@ -308,8 +286,8 @@ func (r *AuditResult) PrintReport(w io.Writer) {
 		maxPath = 50
 	}
 
-	fmt.Fprintf(w, "  %-*s  @require  @must  @expect  @ensure  if  funcs  guarded\n", maxPath, "File")
-	fmt.Fprintf(w, "  %s  %s\n", strings.Repeat("─", maxPath), "────────  ─────  ───────  ───────  ──  ─────  ───────")
+	fmt.Fprintf(w, "  %-*s  @inco:  if  funcs  guarded\n", maxPath, "File")
+	fmt.Fprintf(w, "  %s  %s\n", strings.Repeat("─", maxPath), "──────  ──  ─────  ───────")
 	for _, f := range r.Files {
 		guarded := 0
 		for _, fn := range f.Funcs {
@@ -321,8 +299,8 @@ func (r *AuditResult) PrintReport(w io.Writer) {
 		if len(display) > maxPath {
 			display = "…" + display[len(display)-maxPath+1:]
 		}
-		fmt.Fprintf(w, "  %-*s  %7d  %5d  %7d  %7d  %2d  %5d  %7d\n",
-			maxPath, display, f.RequireCount, f.MustCount, f.ExpectCount, f.EnsureCount,
+		fmt.Fprintf(w, "  %-*s  %7d  %2d  %5d  %7d\n",
+			maxPath, display, f.RequireCount,
 			f.IfCount, len(f.Funcs), guarded)
 	}
 
@@ -336,7 +314,7 @@ func (r *AuditResult) PrintReport(w io.Writer) {
 		}
 	}
 	if len(unguarded) > 0 {
-		fmt.Fprintf(w, "\nFunctions without @require (%d):\n", len(unguarded))
+		fmt.Fprintf(w, "\nFunctions without @inco: (%d):\n", len(unguarded))
 		for _, s := range unguarded {
 			fmt.Fprintln(w, s)
 		}

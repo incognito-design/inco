@@ -2,11 +2,11 @@ package example
 
 import "fmt"
 
-// --- Case 1: Closure with @require ---
+// --- Case 1: Closure with @inco: ---
 
 func ProcessWithCallback(db *DB) {
 	handler := func(u *User) {
-		// @require u != nil
+		// @inco: u != nil
 		fmt.Println(u.Name)
 	}
 
@@ -14,97 +14,81 @@ func ProcessWithCallback(db *DB) {
 	handler(u)
 }
 
-// --- Case 2: @must with custom panic message ---
+// --- Case 2: Custom panic with fmt.Sprintf ---
 
 func FindUser(db *DB, id string) (*User, error) {
-	// @require db != nil panic("db is nil")
-	// @require len(id) > 0 panic(fmt.Sprintf("invalid id: %q", id))
-	user, _ := db.Query("SELECT * FROM users WHERE id = ?") // @must panic("query failed")
+	// @inco: db != nil, -panic("db is nil")
+	// @inco: len(id) > 0, -panic(fmt.Sprintf("invalid id: %q", id))
+	user, err := db.Query("SELECT * FROM users WHERE id = ?")
+	if err != nil {
+		return nil, err
+	}
 	return user, nil
 }
 
 // --- Case 3: Multiple directives on same function ---
 
 func MultiCheck(a, b int, name string) {
-	// @require a > 0 panic("a must be positive")
-	// @require b < 1000 panic("b overflow")
-	// @require len(name) > 0
+	// @inco: a > 0, -panic("a must be positive")
+	// @inco: b < 1000, -panic("b overflow")
+	// @inco: len(name) > 0
 
 	fmt.Println(a, b, name)
 }
 
-// --- Case 4: @expect for map lookup ---
+// --- Case 4: -return action ---
 
-func LookupKey(m map[string]int, key string) int {
-	v, _ := m[key] // @expect panic("key not found: " + key)
-	return v
+func SafeDivide(a, b int) (int, error) {
+	// @inco: b != 0, -return(0, fmt.Errorf("division by zero"))
+	return a / b, nil
 }
 
-// --- Case 5: @expect for type assertion ---
+// --- Case 5: -continue in loop ---
 
-func MustString(x any) string {
-	v, _ := x.(string) // @expect panic("not a string")
-	return v
+func PrintPositive(nums []int) {
+	for _, n := range nums {
+		// @inco: n > 0, -continue
+		fmt.Println(n)
+	}
 }
 
-// --- Case 6: Same-function multiple @must (`:=` then `=`) ---
+// --- Case 6: -break in loop ---
 
-func MultiMust(db *DB) {
-	u1, _ := db.Query("q1") // @must
-	u2, _ := db.Query("q2") // @must
-	fmt.Println(u1, u2)
+func FindFirst(nums []int, target int) int {
+	for i, n := range nums {
+		// @inco: n != target, -break
+		_ = i
+	}
+	return -1
 }
 
-// --- Case 7: Mixed @must + @expect in same function ---
+// --- Case 7: Nested closure ---
 
-func MixedDirectives(db *DB, m map[string]int) {
-	user, _ := db.Query("q") // @must
-	count, _ := m[user.Name] // @expect panic("user not in map")
-	fmt.Println(count)
-}
-
-// --- Case 8: Nested closure with @must ---
-
-func NestedClosure(db *DB) {
+func NestedClosure() {
 	outer := func() {
-		inner := func() {
-			_, _ = db.Query("nested") // @must
+		inner := func(x int) {
+			// @inco: x > 0
+			fmt.Println(x)
 		}
-		inner()
+		inner(1)
 	}
 	outer()
 }
 
-// --- Case 9: Single-value @must (`_ = foo()` pattern) ---
+// --- Case 8: Bare return ---
 
-func SingleValueMust() {
-	_ = fmt.Errorf("test %d", 42) // @must
+func Guard(x int) {
+	// @inco: x >= 0, -return
+	fmt.Println(x)
 }
 
-// --- Case 10: Variable name with underscore — must not be replaced ---
-
-func UnderscoreInName(db *DB) {
-	my_user, _ := db.Query("q") // @must
-	fmt.Println(my_user)
-}
-
-// --- Case 11: @ensure — postcondition via defer ---
-
-func Abs(x int) int {
-	// @ensure result >= 0 panic("absolute value must be non-negative")
-	result := x
-	if x < 0 {
-		result = -x
-	}
-	return result
-}
-
-// --- Case 12: @ensure + @require in same function ---
+// --- Case 9: @inco: in same function with regular if ---
 
 func SafeSlice(s []int, start, end int) []int {
-	// @require start >= 0
-	// @require end <= len(s)
-	// @ensure len(result) == end-start
-	result := s[start:end]
-	return result
+	// @inco: start >= 0
+	// @inco: end <= len(s)
+	if start > end {
+		return nil
+	}
+	return s[start:end]
 }

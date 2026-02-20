@@ -1,20 +1,14 @@
 // Package inco implements a compile-time code injection engine.
 //
-// Directives:
+// Directive:
 //
-//	// @require <expression> [action]
-//	result, _ := foo() // @must [action]
-//	v, _ := m[k]       // @expect [action]
-//	// @ensure <expression> [action]
+//	// @inco: <expr>
+//	// @inco: <expr>, -panic("msg")
+//	// @inco: <expr>, -return(x, y)
+//	// @inco: <expr>, -continue
+//	// @inco: <expr>, -break
 //
-// Actions:
-//
-//	panic            — panic with default message (default action)
-//	panic("msg")     — panic with custom message
-//	return           — bare return
-//	return(x, y)     — return with values
-//	continue         — continue enclosing loop
-//	break            — break enclosing loop
+// The default action is -panic with an auto-generated message.
 package inco
 
 import "fmt"
@@ -48,43 +42,14 @@ func (k ActionKind) String() string {
 }
 
 // ---------------------------------------------------------------------------
-// DirectiveKind
-// ---------------------------------------------------------------------------
-
-// DirectiveKind distinguishes the three directive types.
-type DirectiveKind int
-
-const (
-	KindRequire DirectiveKind = iota // standalone: @require <expr>
-	KindMust                         // inline: error check
-	KindExpect                       // inline: ok/bool check
-	KindEnsure                       // standalone: postcondition via defer
-)
-
-var kindNames = map[DirectiveKind]string{
-	KindRequire: "require",
-	KindMust:    "must",
-	KindExpect:  "expect",
-	KindEnsure:  "ensure",
-}
-
-func (k DirectiveKind) String() string {
-	if s, ok := kindNames[k]; ok {
-		return s
-	}
-	return "unknown"
-}
-
-// ---------------------------------------------------------------------------
 // Directive
 // ---------------------------------------------------------------------------
 
-// Directive is the parsed form of a single @require / @must / @expect / @ensure comment.
+// Directive is the parsed form of a single @inco: comment.
 type Directive struct {
-	Kind       DirectiveKind // require, must, expect, or ensure
-	Action     ActionKind    // panic (default), return, continue, break
-	ActionArgs []string      // e.g. panic("msg") → ['"msg"'], return(0, err) → ["0", "err"]
-	Expr       string        // the Go boolean expression (@require only)
+	Action     ActionKind // panic (default), return, continue, break
+	ActionArgs []string   // e.g. -panic("msg") → ['"msg"'], -return(0, err) → ["0", "err"]
+	Expr       string     // the Go boolean expression
 }
 
 // ---------------------------------------------------------------------------
@@ -100,8 +65,8 @@ type Overlay struct {
 // Recover helper
 // ---------------------------------------------------------------------------
 
-// Recover converts a panic (from @require/@must/@expect/@ensure violations)
-// into an error. Call it via defer:
+// Recover converts a panic (from @inco: violations) into an error.
+// Call it via defer:
 //
 //	var err error
 //	defer inco.Recover(&err)
