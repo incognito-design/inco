@@ -151,9 +151,6 @@ func (e *Engine) processFile(path string, f *ast.File) {
 			}
 		}
 	}
-	if len(directives) == 0 {
-		return
-	}
 
 	// 2. Read source as lines.
 	src, err := os.ReadFile(path)
@@ -175,9 +172,6 @@ func (e *Engine) processFile(path string, f *ast.File) {
 		if isStandaloneLine {
 			standalone[lineNum] = d
 		}
-	}
-	if len(standalone) == 0 {
-		return
 	}
 
 	// 4. Build output: replace directive lines with if-blocks, add //line

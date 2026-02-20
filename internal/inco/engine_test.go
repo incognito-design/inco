@@ -48,8 +48,8 @@ func TestEngine_NoDirectives(t *testing.T) {
 	})
 	e := NewEngine(dir)
 	e.Run()
-	if len(e.Overlay.Replace) != 0 {
-		t.Errorf("expected 0 overlay entries, got %d", len(e.Overlay.Replace))
+	if len(e.Overlay.Replace) != 1 {
+		t.Errorf("expected 1 overlay entry, got %d", len(e.Overlay.Replace))
 	}
 }
 
@@ -238,7 +238,7 @@ func X(x int) {
 	})
 	e := NewEngine(dir)
 	e.Run()
-	if len(e.Overlay.Replace) != 0 {
+	if len(e.Overlay.Replace) != 1 { // only main.go, .hidden skipped
 		t.Errorf("should skip hidden dirs, got %d", len(e.Overlay.Replace))
 	}
 }
@@ -446,9 +446,13 @@ func main() {}
 	e := NewEngine(dir)
 	e.Run()
 	// Struct field inline comment is not a standalone comment line,
-	// so it should NOT produce an overlay.
-	if len(e.Overlay.Replace) != 0 {
-		t.Errorf("struct field comment should not trigger overlay, got %d entries", len(e.Overlay.Replace))
+	// so it should NOT inject guards — but the file still gets a shadow.
+	if len(e.Overlay.Replace) != 1 {
+		t.Errorf("expected 1 overlay entry, got %d", len(e.Overlay.Replace))
+	}
+	shadow := readShadow(t, e)
+	if strings.Contains(shadow, "inco violation") {
+		t.Errorf("struct field comment should not produce guards, got:\n%s", shadow)
 	}
 }
 
@@ -491,7 +495,7 @@ func TestEngine_SkipsTestFiles(t *testing.T) {
 	})
 	e := NewEngine(dir)
 	e.Run()
-	if len(e.Overlay.Replace) != 0 {
+	if len(e.Overlay.Replace) != 1 { // only main.go, _test.go skipped
 		t.Errorf("should skip _test.go, got %d entries", len(e.Overlay.Replace))
 	}
 }
@@ -560,7 +564,7 @@ func TestEngine_SkipsVendor(t *testing.T) {
 	})
 	e := NewEngine(dir)
 	e.Run()
-	if len(e.Overlay.Replace) != 0 {
+	if len(e.Overlay.Replace) != 1 { // only main.go, vendor/testdata skipped
 		t.Errorf("should skip vendor/testdata, got %d entries", len(e.Overlay.Replace))
 	}
 }
