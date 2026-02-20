@@ -1,2 +1,3 @@
 .inco_cache/
+*.inco
 bin/

@@ -19,13 +19,13 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Bootstrap build
-        run: make build
+      - name: Install inco
+        run: go install github.com/incognito-design/inco-go/cmd/inco@latest
 
       - name: Release
         run: |
           # Generate overlay and release .inco.go → .go (with guards)
-          bin/inco release .
+          inco release .
 
           # Rename remaining .inco.go files (those without directives) → .go
           find . -name '*.inco.go' -not -path './.inco_cache/*' | while read -r f; do
@@ -34,9 +34,13 @@ jobs:
             echo "  renamed: $f → $target"
           done
 
-          # Clean up backups and cache
-          find . -name '*.inco' -not -path './.inco_cache/*' -delete
-          rm -rf .inco_cache bin/
+          # Clean up cache
+          rm -rf .inco_cache
+
+          # Update module path for inco-go
+          sed -i 's|github.com/incognito-design/inco$|github.com/incognito-design/inco-go|' go.mod
+          find . -name '*.go' -not -path './.git/*' -exec \
+            sed -i 's|github.com/incognito-design/inco/|github.com/incognito-design/inco-go/|g' {} +
 
       - name: Push to inco-go
         env:
@@ -44,7 +48,7 @@ jobs:
         run: |
           git clone "https://x-access-token:${INCO_GO_TOKEN}@github.com/incognito-design/inco-go.git" /tmp/inco-go
 
-          # Sync everything except .git
+          # Sync everything except .git and .github
           rsync -av --delete \
             --exclude='.git' \
             --exclude='.github' \
