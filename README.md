@@ -22,7 +22,9 @@ When every defensive check is a directive, the remaining `if` statements carry *
 
 ## Directive Syntax
 
-One directive, multiple actions:
+Two forms — **standalone** and **inline**:
+
+### Standalone (entire line is directive)
 
 ```
 // @inco: <expr>
@@ -31,6 +33,15 @@ One directive, multiple actions:
 // @inco: <expr>, -continue
 // @inco: <expr>, -break
 ```
+
+### Inline (code + trailing directive)
+
+```go
+_ = err // @inco: err == nil, -panic(err)
+_ = skip // @inco: !skip, -return(filepath.SkipDir)
+```
+
+Inline directives attach to a code statement via `// @inco:` at the end of the line. The engine uses AST analysis to distinguish inline directives from decorative comments (e.g. struct field comments are ignored).
 
 The default action is `-panic` with an auto-generated message.
 
@@ -50,6 +61,14 @@ func Transfer(from *Account, to *Account, amount int) {
 func Parse(s string) (int, error) {
     // @inco: len(s) > 0, -return(0, fmt.Errorf("empty"))
     return len(s), nil
+}
+```
+
+```go
+func (e *Engine) processFile(path string) {
+    src, err := os.ReadFile(path)
+    _ = err // @inco: err == nil, -panic(err)
+    // ...
 }
 ```
 
@@ -93,6 +112,19 @@ func Transfer(from *Account, to *Account, amount int) {
 }
 ```
 
+For inline directives, the code line is preserved and the if-block is injected after it:
+
+```go
+func (e *Engine) processFile(path string) {
+    src, err := os.ReadFile(path)
+    _ = err
+    if !(err == nil) {
+        panic(err)
+    }
+    // ...
+}
+```
+
 Source files remain untouched. Shadow files live in `.inco_cache/` and are wired in via `go build -overlay`.
 
 ## Generics
@@ -124,8 +156,9 @@ When directive arguments reference standard library packages (e.g. `fmt.Sprintf`
 ## Usage
 
 ```bash
-# Install
-go install github.com/incognito-design/inco/cmd/inco@latest
+# Install (private repo, requires GOPRIVATE)
+GOPRIVATE="github.com/incognito-design/*" \
+  go install github.com/incognito-design/inco-go/cmd/inco@latest
 
 # Generate overlay
 inco gen [dir]
@@ -196,13 +229,17 @@ This removes each generated `foo.go` and restores `foo.inco` → `foo.inco.go`.
 ## Build from Source
 
 ```bash
-# Two-stage build:
-make build
+# Normal build (requires inco in PATH):
+make build      # inco build → bin/inco
+
+# Bootstrap (no inco required):
+make bootstrap
 # Stage 0: plain go build → bin/inco-bootstrap (no contracts)
 # Stage 1: bootstrap generates overlay → compiles with contracts → bin/inco
 
 # Other targets:
 make test       # Run tests with contracts enforced
+make gen        # Regenerate overlay
 make clean      # Remove .inco_cache/ and bin/
 make install    # Install to $GOPATH/bin
 ```
@@ -212,7 +249,7 @@ make install    # Install to $GOPATH/bin
 `inco audit` scans your codebase and reports:
 
 - **@inco: coverage**: percentage of functions guarded by at least one `@inco:` directive
-- **Directive vs if ratio**: total `@inco:` directives compared to native `if` statements
+- **inco/(if+inco) ratio**: what fraction of all conditional guards are `@inco:` directives
 - **Per-file breakdown**: directive and `if` counts per file
 - **Unguarded functions**: list of functions without any `@inco:` directive
 
@@ -221,43 +258,49 @@ $ inco audit .
 inco audit — contract coverage report
 ======================================
 
-  Files scanned:  10
-  Functions:      62
+  Files scanned:  11
+  Functions:      65
 
 @inco: coverage:
-  With @inco::     10 / 62  (16.1%)
-  Without @inco::  52 / 62  (83.9%)
+  With @inco::     38 / 65  (58.5%)
+  Without @inco::  27 / 65  (41.5%)
 
 Directive vs if:
-  @inco::           18
+  @inco::           73
   ─────────────────────
-  Total directives:   18
-  Native if stmts:    122
-  Directive/if ratio: 0.15
+  Total directives:   73
+  Native if stmts:    69
+  inco/(if+inco):     51.4%
 
 Per-file breakdown:
-  File                        @inco:  if  funcs  guarded
-  ──────────────────────────  ──────  ──  ─────  ───────
-  example/demo.inco.go             5   0      3        3
-  example/edge_cases.inco.go       6   1      5        3
-  internal/inco/engine.inco.go     6  45     19        4
-  ...
-
-Functions without @inco: (46):
-  cmd/inco/main.inco.go:24  main
-  internal/inco/engine.inco.go:52  Run
+  File                           @inco:  if  funcs  guarded
+  ─────────────────────────────  ──────  ──  ─────  ───────
+  example/demo.inco.go                5   0      3        3
+  example/edge_cases.inco.go          7   1      5        4
+  internal/inco/engine.inco.go       22  45     19       11
   ...
 ```
 
-The goal: drive `@inco:` coverage up and the directive/if ratio toward 1.0+, meaning most defensive checks live in directives rather than manual `if` statements.
+The goal: drive `inco/(if+inco)` above 50%, meaning the majority of defensive checks live in directives rather than manual `if` statements. When Inco self-hosts, it already exceeds this target at **51.4%**.
 
 ## How It Works
 
 1. `inco gen` scans all `.go` files for `// @inco:` comments
-2. Parses directives and generates shadow files with injected `if`-blocks in `.inco_cache/`
-3. Injects `//line` directives so panic stack traces point back to **original** source lines
-4. Produces `overlay.json` for `go build -overlay`
-5. Source files remain untouched — zero invasion
+2. Uses `go/ast` to classify each directive as **standalone** (comment-only line) or **inline** (attached to a statement)
+3. Generates shadow files in `.inco_cache/` — standalone directives become `if`-blocks in place; inline directives keep the code line and inject the `if`-block after it
+4. Injects `//line` directives so panic stack traces point back to **original** source lines
+5. Produces `overlay.json` for `go build -overlay`
+6. Source files remain untouched — zero invasion
+
+### AST-Based Classification
+
+The engine parses each source file as an AST and collects the set of line numbers that contain Go statements (`AssignStmt`, `ExprStmt`, `ReturnStmt`, etc.). When a `// @inco:` comment is found:
+
+- **Comment-only line** → standalone directive (full line replaced by `if`-block)
+- **Line in statement set** → inline directive (code preserved, `if`-block injected after)
+- **Other** (struct field comment, etc.) → ignored
+
+This prevents false matches on decorative comments like `RequireCount int // @inco: directives`.
 
 ## Project Structure
 
@@ -276,6 +319,45 @@ example/            Demo files:
   generics.inco.go    Type parameters, generic containers
 ```
 
+## Bootstrap Insights
+
+Inco is self-hosting — it uses `@inco:` directives in its own source. The bootstrap process revealed key design insights:
+
+### Directives are guards, not logic
+
+`@inco:` replaces defensive `if`-blocks — nil checks, error checks, range validation. It does **not** replace logic flow. The remaining `if` statements are genuine branching decisions that the program needs to make.
+
+For example, "skip this directory" is logic, not a guard — it stays as `if`. But `err != nil → panic` is a guard — it becomes `// @inco:`.
+
+### Inline directives solve the unused-variable problem
+
+When an error is only used in a directive, Go complains about an unused variable. The solution:
+
+```go
+_ = err // @inco: err == nil, -panic(err)
+```
+
+The `_ = err` satisfies the compiler in plain `go build` (bootstrap), while `// @inco:` generates the real guard in the overlay. One line, dual purpose.
+
+### Bootstrap must compile without directives
+
+Since directives are comments, `go build` ignores them. This means the code must be **valid and runnable** without any `@inco:` expansion. This constraint is actually a strength — it guarantees every `.inco.go` file is testable and buildable with zero tooling.
+
+### Three-level classification was necessary
+
+Naive "is it a comment line? → standalone, else inline" broke on struct field comments. AST analysis was the only robust way to distinguish:
+
+1. Comment lines → standalone directives
+2. Statement lines → inline directives  
+3. Everything else → not a directive
+
+### Current self-hosting stats
+
+- 73 `@inco:` directives, 69 `if` statements
+- **inco/(if+inco): 51.4%** — majority of guards are directives
+- 58.5% function coverage (38/65 functions guarded)
+- 11 source files mapped through overlay
+
 ## Design
 
 - **Zero-invasive**: Plain Go comments — no custom syntax, no broken IDE support
@@ -284,6 +366,7 @@ example/            Demo files:
 - **Cache-friendly**: Content-hash (SHA-256) based shadow filenames for stable build cache
 - **Source-mapped**: `//line` directives preserve original file:line in stack traces
 - **Auto-import**: Standard library references in directive args are auto-imported
+- **Self-hosting**: Inco builds itself with its own directives
 
 ## License
 
