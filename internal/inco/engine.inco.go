@@ -67,6 +67,7 @@ func (e *Engine) Run() {
 	// @inco: e.Root != "", -panic("Run: root must not be empty")
 
 	oldManifest := e.loadManifest()
+	oldOverlay := e.loadOverlayIfExists()
 	paths := collectGoFiles(e.Root)
 
 	// Process files concurrently.
@@ -110,7 +111,12 @@ func (e *Engine) Run() {
 					}
 				}
 
-				// Cache miss — parse and process.
+				// Cache miss — remove stale shadow before generating new one.
+				if old, ok := oldOverlay[path]; ok {
+					os.Remove(old)
+				}
+
+				// Parse and process.
 				f, err := parser.ParseFile(fset, path, nil, parser.ParseComments)
 				_ = err // @inco: err == nil, -panic(err)
 				shadowData := e.generateShadow(path, f, fset)
@@ -144,10 +150,10 @@ func (e *Engine) Run() {
 		}
 	}
 
-	// Clean up stale shadow files.
-	for path, entry := range oldManifest.Files {
-		if _, ok := newManifest.Files[path]; !ok {
-			os.Remove(entry.ShadowPath)
+	// Clean up shadows for source files that no longer exist.
+	for srcPath, shadowPath := range oldOverlay {
+		if _, ok := newManifest.Files[srcPath]; !ok {
+			os.Remove(shadowPath)
 		}
 	}
 
@@ -432,6 +438,21 @@ func (e *Engine) writeOverlay() {
 	_ = err // @inco: err == nil, -panic(err)
 	err = os.WriteFile(filepath.Join(cacheDir, "overlay.json"), data, 0o644)
 	_ = err // @inco: err == nil, -panic(err)
+}
+
+// loadOverlayIfExists reads the previous overlay.json and returns the
+// shadow path map. Returns nil if the file does not exist.
+func (e *Engine) loadOverlayIfExists() map[string]string {
+	overlayPath := filepath.Join(e.Root, ".inco_cache", "overlay.json")
+	data, err := os.ReadFile(overlayPath)
+	if err != nil {
+		return nil
+	}
+	var ov Overlay
+	if json.Unmarshal(data, &ov) != nil {
+		return nil
+	}
+	return ov.Replace
 }
 
 // ---------------------------------------------------------------------------

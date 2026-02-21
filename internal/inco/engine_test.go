@@ -568,3 +568,263 @@ func TestEngine_SkipsVendor(t *testing.T) {
 		t.Errorf("should skip vendor/testdata, got %d entries", len(e.Overlay.Replace))
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Inline directive
+// ---------------------------------------------------------------------------
+
+func TestEngine_InlineDirective(t *testing.T) {
+	dir := setupDir(t, map[string]string{
+		"main.go": `package main
+
+func Do() {
+	err := doSomething()
+	_ = err // @inco: err == nil, -panic(err)
+}
+
+func doSomething() error { return nil }
+`,
+	})
+	e := NewEngine(dir)
+	e.Run()
+	shadow := readShadow(t, e)
+	// Code line should be preserved.
+	if !strings.Contains(shadow, "_ = err") {
+		t.Error("inline directive should preserve code line")
+	}
+	// Guard should be injected after.
+	if !strings.Contains(shadow, "if !(err == nil)") {
+		t.Errorf("should contain guard, got:\n%s", shadow)
+	}
+	if !strings.Contains(shadow, "panic(err)") {
+		t.Error("should contain panic(err)")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// //line at column 1
+// ---------------------------------------------------------------------------
+
+func TestEngine_LineDirectiveColumn1(t *testing.T) {
+	dir := setupDir(t, map[string]string{
+		"main.go": `package main
+
+import "fmt"
+
+func Hello(name string) {
+	// @inco: len(name) > 0
+	fmt.Println(name)
+}
+`,
+	})
+	e := NewEngine(dir)
+	e.Run()
+	shadow := readShadow(t, e)
+	for _, line := range strings.Split(shadow, "\n") {
+		if strings.Contains(line, "//line") {
+			if strings.HasPrefix(line, "\t") || strings.HasPrefix(line, " ") {
+				t.Errorf("//line directive must start at column 1, got: %q", line)
+			}
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Incremental gen — unchanged source reuses cache
+// ---------------------------------------------------------------------------
+
+func TestEngine_IncrementalCache(t *testing.T) {
+	dir := setupDir(t, map[string]string{
+		"main.go": `package main
+
+func Do(x int) {
+	// @inco: x > 0
+	_ = x
+}
+`,
+	})
+
+	// First run — generates shadow.
+	e1 := NewEngine(dir)
+	e1.Run()
+	var shadow1 string
+	for _, sp := range e1.Overlay.Replace {
+		shadow1 = sp
+	}
+
+	// Second run — should reuse cached shadow.
+	e2 := NewEngine(dir)
+	e2.Run()
+	var shadow2 string
+	for _, sp := range e2.Overlay.Replace {
+		shadow2 = sp
+	}
+
+	if shadow1 != shadow2 {
+		t.Errorf("incremental cache should reuse shadow path: %s vs %s", shadow1, shadow2)
+	}
+
+	// Verify shadow file still exists.
+	if _, err := os.Stat(shadow2); err != nil {
+		t.Errorf("cached shadow file should still exist: %v", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Stale shadow cleanup — deleted source file
+// ---------------------------------------------------------------------------
+
+func TestEngine_StaleShadowCleanup(t *testing.T) {
+	dir := setupDir(t, map[string]string{
+		"a.go": `package main
+
+func A(x int) {
+	// @inco: x > 0
+	_ = x
+}
+`,
+		"b.go": `package main
+
+func B(y int) {
+	// @inco: y > 0
+	_ = y
+}
+`,
+	})
+
+	// First run — generates shadows for a.go and b.go.
+	e1 := NewEngine(dir)
+	e1.Run()
+	var shadowB string
+	for src, sp := range e1.Overlay.Replace {
+		if strings.HasSuffix(src, "b.go") {
+			shadowB = sp
+		}
+	}
+	if shadowB == "" {
+		t.Fatal("b.go should have a shadow")
+	}
+
+	// Delete b.go.
+	os.Remove(filepath.Join(dir, "b.go"))
+
+	// Second run — b.go's shadow should be cleaned up.
+	e2 := NewEngine(dir)
+	e2.Run()
+
+	if _, err := os.Stat(shadowB); !os.IsNotExist(err) {
+		t.Errorf("stale shadow for deleted b.go should be removed, but still exists: %s", shadowB)
+	}
+	if len(e2.Overlay.Replace) != 1 {
+		t.Errorf("should have 1 overlay entry after deleting b.go, got %d", len(e2.Overlay.Replace))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Changed source — old shadow removed, new shadow created
+// ---------------------------------------------------------------------------
+
+func TestEngine_ChangedSourceReplacesOldShadow(t *testing.T) {
+	dir := setupDir(t, map[string]string{
+		"main.go": `package main
+
+func Do(x int) {
+	// @inco: x > 0
+	_ = x
+}
+`,
+	})
+
+	// First run.
+	e1 := NewEngine(dir)
+	e1.Run()
+	var oldShadow string
+	for _, sp := range e1.Overlay.Replace {
+		oldShadow = sp
+	}
+
+	// Modify source.
+	os.WriteFile(filepath.Join(dir, "main.go"), []byte(`package main
+
+func Do(x int) {
+	// @inco: x > 0, -panic("must be positive")
+	_ = x
+}
+`), 0o644)
+
+	// Second run.
+	e2 := NewEngine(dir)
+	e2.Run()
+	var newShadow string
+	for _, sp := range e2.Overlay.Replace {
+		newShadow = sp
+	}
+
+	// Old shadow should be gone.
+	if _, err := os.Stat(oldShadow); !os.IsNotExist(err) {
+		t.Errorf("old shadow should be removed after source change: %s", oldShadow)
+	}
+
+	// New shadow should exist.
+	if _, err := os.Stat(newShadow); err != nil {
+		t.Errorf("new shadow should exist: %v", err)
+	}
+
+	// Content should have new panic message.
+	data, _ := os.ReadFile(newShadow)
+	if !strings.Contains(string(data), "must be positive") {
+		t.Error("new shadow should reflect the changed directive")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// loadOverlayIfExists — no overlay.json
+// ---------------------------------------------------------------------------
+
+func TestEngine_LoadOverlayIfExists_NoFile(t *testing.T) {
+	dir := t.TempDir()
+	e := NewEngine(dir)
+	ov := e.loadOverlayIfExists()
+	if ov != nil {
+		t.Errorf("should return nil when no overlay.json, got %v", ov)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Manifest persistence
+// ---------------------------------------------------------------------------
+
+func TestEngine_ManifestPersistence(t *testing.T) {
+	dir := setupDir(t, map[string]string{
+		"main.go": `package main
+
+func Do(x int) {
+	// @inco: x > 0
+	_ = x
+}
+`,
+	})
+
+	e := NewEngine(dir)
+	e.Run()
+
+	// Manifest should exist.
+	mPath := e.manifestPath()
+	if _, err := os.Stat(mPath); err != nil {
+		t.Fatalf("manifest.json should exist: %v", err)
+	}
+
+	// Load it and verify.
+	m := e.loadManifest()
+	if len(m.Files) != 1 {
+		t.Errorf("manifest should have 1 entry, got %d", len(m.Files))
+	}
+	for _, entry := range m.Files {
+		if entry.SrcHash == "" {
+			t.Error("manifest entry should have a non-empty SrcHash")
+		}
+		if entry.ShadowPath == "" {
+			t.Error("manifest entry should have a non-empty ShadowPath")
+		}
+	}
+}
