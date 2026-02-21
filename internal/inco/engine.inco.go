@@ -12,7 +12,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
-	"sort"
 	"strings"
 
 	"golang.org/x/tools/go/ast/astutil"
@@ -47,78 +46,67 @@ func NewEngine(root string) *Engine {
 
 // Run scans all Go source files under Root, processes @inco: directives,
 // and writes the overlay + shadow files into .inco_cache/.
+//
+// Incremental: if a source file's content hash matches the manifest and
+// the shadow file still exists, the file is skipped.
 func (e *Engine) Run() {
 	// @inco: e != nil, -panic("Run: nil engine")
 	// @inco: e.Root != "", -panic("Run: root must not be empty")
-	packages := e.scanPackages()
-	for _, pkg := range packages {
-		e.processPackage(pkg)
+
+	oldManifest := e.loadManifest()
+	newManifest := &Manifest{Files: make(map[string]ManifestEntry)}
+	var skipped int
+
+	walkGoFiles(e.Root, func(path string) error {
+		srcHash := hashFile(path)
+
+		// Check cache: source unchanged & shadow file exists → reuse.
+		if prev, ok := oldManifest.Files[path]; ok && prev.SrcHash == srcHash {
+			if _, err := os.Stat(prev.ShadowPath); err == nil {
+				e.Overlay.Replace[path] = prev.ShadowPath
+				newManifest.Files[path] = prev
+				skipped++
+				return nil
+			}
+		}
+
+		// Cache miss — parse and process.
+		f, err := parser.ParseFile(e.fset, path, nil, parser.ParseComments)
+		_ = err // @inco: err == nil, -panic(err)
+		e.processFile(path, f)
+
+		// Record new manifest entry.
+		if shadowPath, ok := e.Overlay.Replace[path]; ok {
+			newManifest.Files[path] = ManifestEntry{
+				SrcHash:    srcHash,
+				ShadowPath: shadowPath,
+			}
+		}
+		return nil
+	})
+
+	// Clean up stale shadow files.
+	for path, entry := range oldManifest.Files {
+		if _, ok := newManifest.Files[path]; !ok {
+			os.Remove(entry.ShadowPath)
+		}
 	}
 
 	if len(e.Overlay.Replace) > 0 {
 		e.writeOverlay()
-		fmt.Fprintf(os.Stderr, "inco: overlay written to %s (%d file(s) mapped)\n",
+		e.writeManifest(newManifest)
+		processed := len(e.Overlay.Replace) - skipped
+		fmt.Fprintf(os.Stderr, "inco: overlay written to %s (%d file(s) mapped, %d processed, %d cached)\n",
 			filepath.Join(e.Root, ".inco_cache", "overlay.json"),
-			len(e.Overlay.Replace))
+			len(e.Overlay.Replace), processed, skipped)
+	} else {
+		e.writeManifest(newManifest)
 	}
 }
 
 // ---------------------------------------------------------------------------
-// Package scanning
+// File processing
 // ---------------------------------------------------------------------------
-
-type pkgBundle struct {
-	Dir   string
-	Files map[string]*ast.File // absolute path → AST
-	Paths []string             // sorted absolute paths (deterministic iteration)
-}
-
-// scanPackages walks Root, parses every non-test .go file, and groups them
-// by directory (= Go package).
-func (e *Engine) scanPackages() []*pkgBundle {
-	dirFiles := make(map[string]map[string]*ast.File)
-
-	walkGoFiles(e.Root, func(path string) error {
-		f, err := parser.ParseFile(e.fset, path, nil, parser.ParseComments)
-		_ = err // @inco: err == nil, -panic(err)
-		dir := filepath.Dir(path)
-		if dirFiles[dir] == nil {
-			dirFiles[dir] = make(map[string]*ast.File)
-		}
-		dirFiles[dir][path] = f
-		return nil
-	})
-
-	// Sort directories for deterministic order.
-	dirs := make([]string, 0, len(dirFiles))
-	for d := range dirFiles {
-		dirs = append(dirs, d)
-	}
-	sort.Strings(dirs)
-
-	result := make([]*pkgBundle, 0, len(dirs))
-	for _, dir := range dirs {
-		files := dirFiles[dir]
-		paths := make([]string, 0, len(files))
-		for p := range files {
-			paths = append(paths, p)
-		}
-		sort.Strings(paths)
-		result = append(result, &pkgBundle{Dir: dir, Files: files, Paths: paths})
-	}
-	return result
-}
-
-// ---------------------------------------------------------------------------
-// Package & file processing
-// ---------------------------------------------------------------------------
-
-func (e *Engine) processPackage(pkg *pkgBundle) {
-	// @inco: pkg != nil
-	for _, path := range pkg.Paths {
-		e.processFile(path, pkg.Files[path])
-	}
-}
 
 // processFile scans a single source file for directives,
 // generates injected if-blocks via text replacement, and writes a shadow.
@@ -396,6 +384,44 @@ func (e *Engine) writeOverlay() {
 	_ = err // @inco: err == nil, -panic(err)
 	err = os.WriteFile(filepath.Join(cacheDir, "overlay.json"), data, 0o644)
 	_ = err // @inco: err == nil, -panic(err)
+}
+
+// ---------------------------------------------------------------------------
+// Manifest I/O (incremental gen)
+// ---------------------------------------------------------------------------
+
+func (e *Engine) manifestPath() string {
+	return filepath.Join(e.Root, ".inco_cache", "manifest.json")
+}
+
+func (e *Engine) loadManifest() *Manifest {
+	data, err := os.ReadFile(e.manifestPath())
+	if err != nil {
+		return &Manifest{Files: make(map[string]ManifestEntry)}
+	}
+	var m Manifest
+	if json.Unmarshal(data, &m) != nil || m.Files == nil {
+		return &Manifest{Files: make(map[string]ManifestEntry)}
+	}
+	return &m
+}
+
+func (e *Engine) writeManifest(m *Manifest) {
+	cacheDir := filepath.Join(e.Root, ".inco_cache")
+	err := os.MkdirAll(cacheDir, 0o755)
+	_ = err // @inco: err == nil, -panic(err)
+	data, err := json.MarshalIndent(m, "", "  ")
+	_ = err // @inco: err == nil, -panic(err)
+	err = os.WriteFile(e.manifestPath(), data, 0o644)
+	_ = err // @inco: err == nil, -panic(err)
+}
+
+// hashFile returns the hex-encoded SHA-256 of a file's contents.
+func hashFile(path string) string {
+	data, err := os.ReadFile(path)
+	_ = err // @inco: err == nil, -panic(err)
+	h := sha256.Sum256(data)
+	return fmt.Sprintf("%x", h)
 }
 
 // ---------------------------------------------------------------------------
