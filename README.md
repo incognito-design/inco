@@ -1,6 +1,6 @@
 # Inco
 
-Inco is a compile-time assertion engine for Go. Write contract directives as plain comments; they are transformed into runtime guards in shadow files, wired in via `go build -overlay`. Your source stays untouched.
+Inco is a compile-time assertion engine for Go. Write contract directives as plain comments; they are transformed into runtime guards in shadow files, wired in via `go build -overlay`.
 
 ## Philosophy
 
@@ -123,7 +123,7 @@ func (e *Engine) processFile(path string) {
 }
 ```
 
-Source files remain untouched. Shadow files live in `.inco_cache/` and are wired in via `go build -overlay`.
+Shadow files live in `.inco_cache/` and are wired in via `go build -overlay`.
 
 ## Generics
 
@@ -282,7 +282,7 @@ The goal: drive `inco/(if+inco)` above 50%, meaning the majority of defensive ch
 3. Generates shadow files in `.inco_cache/` — standalone directives become `if`-blocks in place; inline directives keep the code line and inject the `if`-block after it
 4. Injects `//line` directives so panic stack traces point back to **original** source lines
 5. Produces `overlay.json` for `go build -overlay`
-6. Source files remain untouched — zero invasion
+6. Shadow files replace originals via overlay — source files are not modified on disk
 
 ### AST-Based Classification
 
@@ -343,7 +343,7 @@ _ = err // @inco: err == nil, -panic(err)
 
 ## Design
 
-- **Zero-invasive**: Plain Go comments — no custom syntax, no broken IDE support
+- **Comment-based**: Plain Go comments — no custom syntax, no broken IDE support
 - **Fail-fast**: panic by default — or return, continue, break as needed
 - **Zero-overhead option**: Strip directives in production, or keep for fail-fast
 - **Cache-friendly**: Content-hash (SHA-256) based shadow filenames for stable build cache
