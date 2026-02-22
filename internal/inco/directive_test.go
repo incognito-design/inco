@@ -176,9 +176,9 @@ func TestBuildPanicBody_Do(t *testing.T) {
 	}
 }
 
-func TestBuildPanicBody_DoMultiStmt(t *testing.T) {
+func TestBuildPanicBody_DoMultiExpr(t *testing.T) {
 	e := NewEngine(t.TempDir())
-	d := &Directive{Action: ActionDo, Expr: "ok", ActionArgs: []string{`count++; log.Println("fail")`}}
+	d := &Directive{Action: ActionDo, Expr: "ok", ActionArgs: []string{"count++", `log.Println("fail")`}}
 	body := e.buildPanicBody(d, "test.go", 1)
 	want := `count++; log.Println("fail")`
 	if body != want {

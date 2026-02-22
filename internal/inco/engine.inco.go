@@ -295,7 +295,7 @@ func (e *Engine) buildPanicBody(d *Directive, path string, line int) string {
 	case ActionBreak:
 		return "break"
 	case ActionDo:
-		return d.ActionArgs[0]
+		return strings.Join(d.ActionArgs, "; ")
 	case ActionLog:
 		return "log.Println(" + strings.Join(d.ActionArgs, ", ") + ")"
 	default: // ActionPanic

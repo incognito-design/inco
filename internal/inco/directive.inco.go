@@ -51,13 +51,7 @@ func ParseDirective(comment string) *Directive {
 		d.Expr = strings.TrimSpace(am[1])
 		d.Action = actionFromName[am[2]]
 		if am[3] != "" {
-			if d.Action == ActionDo {
-				// -do keeps raw content as a single arg so that
-				// commas in statements (e.g. return a, b) are preserved.
-				d.ActionArgs = []string{strings.TrimSpace(am[3])}
-			} else {
-				d.ActionArgs = splitTopLevel(am[3])
-			}
+			d.ActionArgs = splitTopLevel(am[3])
 		}
 	} else {
 		d.Expr = rest
