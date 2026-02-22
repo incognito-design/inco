@@ -62,9 +62,9 @@ type fileResult struct {
 // the shadow file still exists, the file is skipped.
 //
 // File processing is parallelized across available CPUs.
-func (e *Engine) Run() {
-	// @inco: e != nil, -panic("Run: nil engine")
-	// @inco: e.Root != "", -panic("Run: root must not be empty")
+func (e *Engine) Run() error {
+	// @inco: e != nil, -return(fmt.Errorf("Run: nil engine"))
+	// @inco: e.Root != "", -return(fmt.Errorf("Run: root must not be empty"))
 
 	oldManifest := e.loadManifest()
 	oldOverlay := e.loadOverlayIfExists()
@@ -78,7 +78,7 @@ func (e *Engine) Run() {
 	}
 
 	var wg sync.WaitGroup
-	var workerErr atomic.Value // stores first panic as error
+	var workerErr atomic.Value // stores first error from a worker
 	ch := make(chan int, len(paths))
 	for i := range paths {
 		ch <- i
@@ -98,7 +98,11 @@ func (e *Engine) Run() {
 			fset := token.NewFileSet()
 			for idx := range ch {
 				path := paths[idx]
-				srcHash := hashFile(path)
+				srcHash, err := hashFile(path)
+				if err != nil {
+					workerErr.CompareAndSwap(nil, err)
+					return
+				}
 
 				// Check cache: source unchanged & shadow file exists → reuse.
 				if prev, ok := oldManifest.Files[path]; ok && prev.SrcHash == srcHash {
@@ -118,7 +122,10 @@ func (e *Engine) Run() {
 
 				// Parse and process.
 				f, err := parser.ParseFile(fset, path, nil, parser.ParseComments)
-				_ = err // @inco: err == nil, -panic(err)
+				if err != nil {
+					workerErr.CompareAndSwap(nil, fmt.Errorf("parse %s: %w", path, err))
+					return
+				}
 				shadowData := e.generateShadow(path, f, fset)
 				results[idx] = fileResult{
 					Path: path, SrcHash: srcHash,
@@ -129,12 +136,16 @@ func (e *Engine) Run() {
 	}
 	wg.Wait()
 
-	// Re-panic on main goroutine so guardPanic() in main() can catch it.
 	if v := workerErr.Load(); v != nil {
-		panic(v)
+		return v.(error)
 	}
 
-	// Collect results sequentially — write shadows, build overlay & manifest.
+	return e.commitResults(results, oldOverlay)
+}
+
+// commitResults writes shadow files, builds overlay & manifest, and
+// cleans up stale shadows for deleted source files.
+func (e *Engine) commitResults(results []fileResult, oldOverlay map[string]string) error {
 	newManifest := &Manifest{Files: make(map[string]ManifestEntry)}
 	var skipped int
 	for _, r := range results {
@@ -143,7 +154,9 @@ func (e *Engine) Run() {
 			newManifest.Files[r.Path] = ManifestEntry{SrcHash: r.SrcHash, ShadowPath: r.ShadowPath}
 			skipped++
 		} else {
-			e.writeShadow(r.Path, r.ShadowData)
+			if err := e.writeShadow(r.Path, r.ShadowData); err != nil {
+				return err
+			}
 			if sp, ok := e.Overlay.Replace[r.Path]; ok {
 				newManifest.Files[r.Path] = ManifestEntry{SrcHash: r.SrcHash, ShadowPath: sp}
 			}
@@ -157,16 +170,20 @@ func (e *Engine) Run() {
 		}
 	}
 
+	if err := e.writeOverlay(); err != nil {
+		return err
+	}
+	if err := e.writeManifest(newManifest); err != nil {
+		return err
+	}
+
 	if len(e.Overlay.Replace) > 0 {
-		e.writeOverlay()
-		e.writeManifest(newManifest)
 		processed := len(e.Overlay.Replace) - skipped
 		fmt.Fprintf(os.Stderr, "inco: overlay written to %s (%d file(s) mapped, %d processed, %d cached)\n",
 			filepath.Join(e.Root, ".inco_cache", "overlay.json"),
 			len(e.Overlay.Replace), processed, skipped)
-	} else {
-		e.writeManifest(newManifest)
 	}
+	return nil
 }
 
 // ---------------------------------------------------------------------------
@@ -306,10 +323,10 @@ func (e *Engine) buildImportMap() map[string]string {
 		ambiguous := make(map[string]bool)
 
 		// 1. All standard library packages.
-		e.collectPackages(ambiguous, "std")
+		e.collectPackages(ambiguous, "-e", "std")
 
 		// 2. Packages already used in the module (covers third-party deps).
-		e.collectPackages(ambiguous, "-deps", "-e", "./...")
+		e.collectPackages(ambiguous, "-e", "-deps", "./...")
 
 		// Remove ambiguous names (multiple import paths share a short name,
 		// e.g. "template" → text/template vs html/template).
@@ -323,7 +340,7 @@ func (e *Engine) buildImportMap() map[string]string {
 // collectPackages runs "go list" with the given patterns and records
 // each name → importPath pair in e.importMap.
 func (e *Engine) collectPackages(ambiguous map[string]bool, patterns ...string) {
-	args := append([]string{"list", "-e", "-f", "{{.Name}} {{.ImportPath}}"}, patterns...)
+	args := append([]string{"list", "-f", "{{.Name}} {{.ImportPath}}"}, patterns...)
 	cmd := exec.Command("go", args...)
 	cmd.Dir = e.Root
 	out, err := cmd.Output()
@@ -414,10 +431,10 @@ func (e *Engine) addMissingImports(content string, origFile *ast.File, directive
 // Shadow & overlay I/O
 // ---------------------------------------------------------------------------
 
-func (e *Engine) writeShadow(origPath string, content []byte) {
+func (e *Engine) writeShadow(origPath string, content []byte) error {
 	cacheDir := filepath.Join(e.Root, ".inco_cache")
 	err := os.MkdirAll(cacheDir, 0o755)
-	_ = err // @inco: err == nil, -panic(err)
+	_ = err // @inco: err == nil, -return(fmt.Errorf("writeShadow: mkdir: %w", err))
 
 	hash := sha256.Sum256(content)
 	shadowName := fmt.Sprintf("%s_%x.go",
@@ -426,18 +443,20 @@ func (e *Engine) writeShadow(origPath string, content []byte) {
 	shadowPath := filepath.Join(cacheDir, shadowName)
 
 	err = os.WriteFile(shadowPath, content, 0o644)
-	_ = err // @inco: err == nil, -panic(err)
+	_ = err // @inco: err == nil, -return(fmt.Errorf("writeShadow: write: %w", err))
 	e.Overlay.Replace[origPath] = shadowPath
+	return nil
 }
 
-func (e *Engine) writeOverlay() {
+func (e *Engine) writeOverlay() error {
 	cacheDir := filepath.Join(e.Root, ".inco_cache")
 	err := os.MkdirAll(cacheDir, 0o755)
-	_ = err // @inco: err == nil, -panic(err)
+	_ = err // @inco: err == nil, -return(fmt.Errorf("writeOverlay: mkdir: %w", err))
 	data, err := json.MarshalIndent(e.Overlay, "", "  ")
-	_ = err // @inco: err == nil, -panic(err)
+	_ = err // @inco: err == nil, -return(fmt.Errorf("writeOverlay: marshal: %w", err))
 	err = os.WriteFile(filepath.Join(cacheDir, "overlay.json"), data, 0o644)
-	_ = err // @inco: err == nil, -panic(err)
+	_ = err // @inco: err == nil, -return(fmt.Errorf("writeOverlay: write: %w", err))
+	return nil
 }
 
 // loadOverlayIfExists reads the previous overlay.json and returns the
@@ -445,9 +464,7 @@ func (e *Engine) writeOverlay() {
 func (e *Engine) loadOverlayIfExists() map[string]string {
 	overlayPath := filepath.Join(e.Root, ".inco_cache", "overlay.json")
 	data, err := os.ReadFile(overlayPath)
-	if err != nil {
-		return nil
-	}
+	_ = err // @inco: err == nil, -return(nil)
 	var ov Overlay
 	if json.Unmarshal(data, &ov) != nil {
 		return nil
@@ -473,22 +490,23 @@ func (e *Engine) loadManifest() *Manifest {
 	return &m
 }
 
-func (e *Engine) writeManifest(m *Manifest) {
+func (e *Engine) writeManifest(m *Manifest) error {
 	cacheDir := filepath.Join(e.Root, ".inco_cache")
 	err := os.MkdirAll(cacheDir, 0o755)
-	_ = err // @inco: err == nil, -panic(err)
+	_ = err // @inco: err == nil, -return(fmt.Errorf("writeManifest: mkdir: %w", err))
 	data, err := json.MarshalIndent(m, "", "  ")
-	_ = err // @inco: err == nil, -panic(err)
+	_ = err // @inco: err == nil, -return(fmt.Errorf("writeManifest: marshal: %w", err))
 	err = os.WriteFile(e.manifestPath(), data, 0o644)
-	_ = err // @inco: err == nil, -panic(err)
+	_ = err // @inco: err == nil, -return(fmt.Errorf("writeManifest: write: %w", err))
+	return nil
 }
 
 // hashFile returns the hex-encoded SHA-256 of a file's contents.
-func hashFile(path string) string {
+func hashFile(path string) (string, error) {
 	data, err := os.ReadFile(path)
-	_ = err // @inco: err == nil, -panic(err)
+	_ = err // @inco: err == nil, -return("", fmt.Errorf("hashFile %s: %w", path, err))
 	h := sha256.Sum256(data)
-	return fmt.Sprintf("%x", h)
+	return fmt.Sprintf("%x", h), nil
 }
 
 // ---------------------------------------------------------------------------

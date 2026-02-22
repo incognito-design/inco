@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	inco "github.com/imnive-design/inco-go/internal/inco"
 )
@@ -16,7 +17,7 @@ Usage:
   inco test [args]         Run gen + go test -overlay
   inco run [args]          Run gen + go run -overlay
   inco audit [dir]         Contract coverage report
-  inco release [dir]       Copy guards into source tree with //go:build inco
+  inco release [--dry-run] [dir]       Copy guards into source tree
   inco release clean [dir] Remove released files and restore originals
   inco clean [dir]         Remove .inco_cache
 
@@ -49,9 +50,23 @@ func main() {
 		if len(os.Args) > 2 && os.Args[2] == "clean" {
 			runReleaseClean(getDir(3))
 		} else {
-			dir := getDir(2)
+			dryRun := false
+			dirIdx := 2
+			for i := 2; i < len(os.Args); i++ {
+				if os.Args[i] == "--dry-run" {
+					dryRun = true
+				}
+			}
+			// Find the first non-flag argument as dir.
+			for i := 2; i < len(os.Args); i++ {
+				if !strings.HasPrefix(os.Args[i], "-") {
+					dirIdx = i
+					break
+				}
+			}
+			dir := getDir(dirIdx)
 			runGen(dir)
-			runRelease(dir)
+			runRelease(dir, dryRun)
 		}
 	case "clean":
 		dir := getDir(2)
@@ -82,25 +97,30 @@ func getDir(argIdx int) string {
 func runGen(dir string) {
 	absDir, err := filepath.Abs(dir)
 	_ = err // @inco: err == nil, -panic(err)
-	inco.NewEngine(absDir).Run()
+	err = inco.NewEngine(absDir).Run()
+	_ = err // @inco: err == nil, -panic(err)
 }
 
 func runAudit(dir string) *inco.AuditResult {
 	absDir, err := filepath.Abs(dir)
 	_ = err // @inco: err == nil, -panic(err)
-	return inco.Audit(absDir)
+	result, err := inco.Audit(absDir)
+	_ = err // @inco: err == nil, -panic(err)
+	return result
 }
 
-func runRelease(dir string) {
+func runRelease(dir string, dryRun bool) {
 	absDir, err := filepath.Abs(dir)
 	_ = err // @inco: err == nil, -panic(err)
-	inco.Release(absDir)
+	err = inco.Release(absDir, dryRun)
+	_ = err // @inco: err == nil, -panic(err)
 }
 
 func runReleaseClean(dir string) {
 	absDir, err := filepath.Abs(dir)
 	_ = err // @inco: err == nil, -panic(err)
-	inco.ReleaseClean(absDir)
+	err = inco.ReleaseClean(absDir)
+	_ = err // @inco: err == nil, -panic(err)
 }
 
 func runGo(subcmd, dir string, extraArgs []string) {

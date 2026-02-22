@@ -50,10 +50,10 @@ type AuditResult struct {
 
 // Audit scans all Go source files under root and produces an AuditResult
 // summarising @inco: coverage and directive-vs-if ratios.
-func Audit(root string) *AuditResult {
-	// @inco: root != "", -panic("Audit: root must not be empty")
+func Audit(root string) (*AuditResult, error) {
+	// @inco: root != "", -return(nil, fmt.Errorf("Audit: root must not be empty"))
 	absRoot, err := filepath.Abs(root)
-	_ = err // @inco: err == nil, -panic(err)
+	_ = err // @inco: err == nil, -return(nil, fmt.Errorf("Audit: %w", err))
 
 	fset := token.NewFileSet()
 	var files []FileAudit
@@ -82,7 +82,7 @@ func Audit(root string) *AuditResult {
 		}
 	}
 	r.TotalDirectives = r.TotalRequires
-	return r
+	return r, nil
 }
 
 // ---------------------------------------------------------------------------

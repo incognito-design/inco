@@ -48,7 +48,10 @@ type DB struct{}
 func (db *DB) Query(q string) (string, error) { return "", nil }
 `)
 
-	result := Audit(dir)
+	result, err := Audit(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	if result.TotalFiles != 1 {
 		t.Errorf("TotalFiles = %d, want 1", result.TotalFiles)
@@ -96,7 +99,10 @@ func C(z int) {
 }
 `)
 
-	result := Audit(dir)
+	result, err := Audit(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	if result.TotalFiles != 2 {
 		t.Errorf("TotalFiles = %d, want 2", result.TotalFiles)
@@ -145,7 +151,10 @@ func Y(b int) {
 }
 `)
 
-	result := Audit(dir)
+	result, err := Audit(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	if result.TotalFiles != 1 {
 		t.Errorf("TotalFiles = %d, want 1", result.TotalFiles)
@@ -173,7 +182,10 @@ func Outer() {
 }
 `)
 
-	result := Audit(dir)
+	result, err := Audit(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	if result.TotalFuncs != 2 { // Outer + func literal
 		t.Errorf("TotalFuncs = %d, want 2", result.TotalFuncs)
@@ -195,7 +207,10 @@ func TestAudit_EmptyProject(t *testing.T) {
 func main() {}
 `)
 
-	result := Audit(dir)
+	result, err := Audit(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	if result.TotalFuncs != 1 {
 		t.Errorf("TotalFuncs = %d, want 1", result.TotalFuncs)
@@ -224,7 +239,10 @@ func (s *Svc) Do(x int) {
 }
 `)
 
-	result := Audit(dir)
+	result, err := Audit(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	if result.TotalFuncs != 1 {
 		t.Errorf("TotalFuncs = %d, want 1", result.TotalFuncs)
@@ -303,7 +321,10 @@ func Check(x int) {
 }
 `)
 
-	result := Audit(dir)
+	result, err := Audit(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	if result.TotalRequires != 1 {
 		t.Errorf("TotalRequires = %d, want 1", result.TotalRequires)

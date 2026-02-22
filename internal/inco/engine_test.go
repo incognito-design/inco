@@ -47,7 +47,9 @@ func TestEngine_NoDirectives(t *testing.T) {
 		"main.go": "package main\n\nfunc main() {}\n",
 	})
 	e := NewEngine(dir)
-	e.Run()
+	if err := e.Run(); err != nil {
+		t.Fatal(err)
+	}
 	if len(e.Overlay.Replace) != 1 {
 		t.Errorf("expected 1 overlay entry, got %d", len(e.Overlay.Replace))
 	}
@@ -70,7 +72,9 @@ func Greet(name string) {
 `,
 	})
 	e := NewEngine(dir)
-	e.Run()
+	if err := e.Run(); err != nil {
+		t.Fatal(err)
+	}
 	shadow := readShadow(t, e)
 	if !strings.Contains(shadow, "!(len(name) > 0)") {
 		t.Errorf("shadow should contain negated condition, got:\n%s", shadow)
@@ -100,7 +104,9 @@ func Process(x int) {
 `,
 	})
 	e := NewEngine(dir)
-	e.Run()
+	if err := e.Run(); err != nil {
+		t.Fatal(err)
+	}
 	shadow := readShadow(t, e)
 	if !strings.Contains(shadow, `panic("x must be positive")`) {
 		t.Errorf("shadow should contain custom panic message, got:\n%s", shadow)
@@ -120,7 +126,9 @@ func Check(x int) {
 `,
 	})
 	e := NewEngine(dir)
-	e.Run()
+	if err := e.Run(); err != nil {
+		t.Fatal(err)
+	}
 	shadow := readShadow(t, e)
 	if !strings.Contains(shadow, `panic(fmt.Sprintf("bad value: %d", x))`) {
 		t.Errorf("shadow should contain custom panic with Sprintf, got:\n%s", shadow)
@@ -145,7 +153,9 @@ func Process(name string, age int) {
 `,
 	})
 	e := NewEngine(dir)
-	e.Run()
+	if err := e.Run(); err != nil {
+		t.Fatal(err)
+	}
 	shadow := readShadow(t, e)
 	if !strings.Contains(shadow, "!(len(name) > 0)") {
 		t.Error("missing first condition")
@@ -178,7 +188,9 @@ func Hello(name string) {
 `,
 	})
 	e := NewEngine(dir)
-	e.Run()
+	if err := e.Run(); err != nil {
+		t.Fatal(err)
+	}
 	shadow := readShadow(t, e)
 	if !strings.Contains(shadow, "//line") {
 		t.Error("shadow should contain //line directives")
@@ -200,7 +212,9 @@ func Do(x int) {
 `,
 	})
 	e := NewEngine(dir)
-	e.Run()
+	if err := e.Run(); err != nil {
+		t.Fatal(err)
+	}
 
 	overlayPath := filepath.Join(dir, ".inco_cache", "overlay.json")
 	data, err := os.ReadFile(overlayPath)
@@ -237,7 +251,9 @@ func X(x int) {
 		"main.go": "package main\n\nfunc main() {}\n",
 	})
 	e := NewEngine(dir)
-	e.Run()
+	if err := e.Run(); err != nil {
+		t.Fatal(err)
+	}
 	if len(e.Overlay.Replace) != 1 { // only main.go, .hidden skipped
 		t.Errorf("should skip hidden dirs, got %d", len(e.Overlay.Replace))
 	}
@@ -259,14 +275,18 @@ func Do(x int) {
 	})
 
 	e1 := NewEngine(dir)
-	e1.Run()
+	if err := e1.Run(); err != nil {
+		t.Fatal(err)
+	}
 	var p1 string
 	for _, p := range e1.Overlay.Replace {
 		p1 = p
 	}
 
 	e2 := NewEngine(dir)
-	e2.Run()
+	if err := e2.Run(); err != nil {
+		t.Fatal(err)
+	}
 	var p2 string
 	for _, p := range e2.Overlay.Replace {
 		p2 = p
@@ -297,7 +317,9 @@ func Outer() {
 `,
 	})
 	e := NewEngine(dir)
-	e.Run()
+	if err := e.Run(); err != nil {
+		t.Fatal(err)
+	}
 	shadow := readShadow(t, e)
 	if !strings.Contains(shadow, "!(x > 0)") {
 		t.Error("should process directives inside closures")
@@ -319,7 +341,9 @@ func Positive(x int) int {
 `,
 	})
 	e := NewEngine(dir)
-	e.Run()
+	if err := e.Run(); err != nil {
+		t.Fatal(err)
+	}
 	shadow := readShadow(t, e)
 	if !strings.Contains(shadow, "if !(x > 0)") {
 		t.Errorf("should contain negated condition, got:\n%s", shadow)
@@ -342,7 +366,9 @@ func Parse(s string) (int, error) {
 `,
 	})
 	e := NewEngine(dir)
-	e.Run()
+	if err := e.Run(); err != nil {
+		t.Fatal(err)
+	}
 	shadow := readShadow(t, e)
 	if !strings.Contains(shadow, `return 0, fmt.Errorf("empty")`) {
 		t.Errorf("should contain multi-value return, got:\n%s", shadow)
@@ -362,7 +388,9 @@ func Check(x int) {
 `,
 	})
 	e := NewEngine(dir)
-	e.Run()
+	if err := e.Run(); err != nil {
+		t.Fatal(err)
+	}
 	shadow := readShadow(t, e)
 	if !strings.Contains(shadow, "return\n") {
 		t.Errorf("should contain bare return, got:\n%s", shadow)
@@ -388,7 +416,9 @@ func PrintPositive(nums []int) {
 `,
 	})
 	e := NewEngine(dir)
-	e.Run()
+	if err := e.Run(); err != nil {
+		t.Fatal(err)
+	}
 	shadow := readShadow(t, e)
 	if !strings.Contains(shadow, "if !(n > 0)") {
 		t.Errorf("should contain negated condition, got:\n%s", shadow)
@@ -417,7 +447,9 @@ func FindFirst(nums []int) {
 `,
 	})
 	e := NewEngine(dir)
-	e.Run()
+	if err := e.Run(); err != nil {
+		t.Fatal(err)
+	}
 	shadow := readShadow(t, e)
 	if !strings.Contains(shadow, "if !(n != 42)") {
 		t.Errorf("should contain negated condition, got:\n%s", shadow)
@@ -444,7 +476,9 @@ func main() {}
 `,
 	})
 	e := NewEngine(dir)
-	e.Run()
+	if err := e.Run(); err != nil {
+		t.Fatal(err)
+	}
 	// Struct field inline comment is not a standalone comment line,
 	// so it should NOT inject guards — but the file still gets a shadow.
 	if len(e.Overlay.Replace) != 1 {
@@ -478,7 +512,9 @@ func B(y int) {
 `,
 	})
 	e := NewEngine(dir)
-	e.Run()
+	if err := e.Run(); err != nil {
+		t.Fatal(err)
+	}
 	if len(e.Overlay.Replace) != 2 {
 		t.Errorf("expected 2 overlay entries, got %d", len(e.Overlay.Replace))
 	}
@@ -494,7 +530,9 @@ func TestEngine_SkipsTestFiles(t *testing.T) {
 		"main_test.go": "package main\n\nfunc TestFoo() {\n\t// @inco: true\n}\n",
 	})
 	e := NewEngine(dir)
-	e.Run()
+	if err := e.Run(); err != nil {
+		t.Fatal(err)
+	}
 	if len(e.Overlay.Replace) != 1 { // only main.go, _test.go skipped
 		t.Errorf("should skip _test.go, got %d entries", len(e.Overlay.Replace))
 	}
@@ -515,7 +553,9 @@ func Do(s string) (int, error) {
 `,
 	})
 	e := NewEngine(dir)
-	e.Run()
+	if err := e.Run(); err != nil {
+		t.Fatal(err)
+	}
 	shadow := readShadow(t, e)
 	if !strings.Contains(shadow, `"fmt"`) {
 		t.Errorf("should inject fmt import, got:\n%s", shadow)
@@ -545,7 +585,9 @@ func Outer() {
 `,
 	})
 	e := NewEngine(dir)
-	e.Run()
+	if err := e.Run(); err != nil {
+		t.Fatal(err)
+	}
 	shadow := readShadow(t, e)
 	if !strings.Contains(shadow, "!(x > 0)") {
 		t.Error("should process directive in nested closure")
@@ -563,7 +605,9 @@ func TestEngine_SkipsVendor(t *testing.T) {
 		"testdata/td.go": "package td\n\nfunc TD(x int) {\n\t// @inco: x > 0\n}\n",
 	})
 	e := NewEngine(dir)
-	e.Run()
+	if err := e.Run(); err != nil {
+		t.Fatal(err)
+	}
 	if len(e.Overlay.Replace) != 1 { // only main.go, vendor/testdata skipped
 		t.Errorf("should skip vendor/testdata, got %d entries", len(e.Overlay.Replace))
 	}
@@ -586,7 +630,9 @@ func doSomething() error { return nil }
 `,
 	})
 	e := NewEngine(dir)
-	e.Run()
+	if err := e.Run(); err != nil {
+		t.Fatal(err)
+	}
 	shadow := readShadow(t, e)
 	// Code line should be preserved.
 	if !strings.Contains(shadow, "_ = err") {
@@ -618,7 +664,9 @@ func Hello(name string) {
 `,
 	})
 	e := NewEngine(dir)
-	e.Run()
+	if err := e.Run(); err != nil {
+		t.Fatal(err)
+	}
 	shadow := readShadow(t, e)
 	for _, line := range strings.Split(shadow, "\n") {
 		if strings.Contains(line, "//line") {
@@ -646,7 +694,9 @@ func Do(x int) {
 
 	// First run — generates shadow.
 	e1 := NewEngine(dir)
-	e1.Run()
+	if err := e1.Run(); err != nil {
+		t.Fatal(err)
+	}
 	var shadow1 string
 	for _, sp := range e1.Overlay.Replace {
 		shadow1 = sp
@@ -654,7 +704,9 @@ func Do(x int) {
 
 	// Second run — should reuse cached shadow.
 	e2 := NewEngine(dir)
-	e2.Run()
+	if err := e2.Run(); err != nil {
+		t.Fatal(err)
+	}
 	var shadow2 string
 	for _, sp := range e2.Overlay.Replace {
 		shadow2 = sp
@@ -694,7 +746,9 @@ func B(y int) {
 
 	// First run — generates shadows for a.go and b.go.
 	e1 := NewEngine(dir)
-	e1.Run()
+	if err := e1.Run(); err != nil {
+		t.Fatal(err)
+	}
 	var shadowB string
 	for src, sp := range e1.Overlay.Replace {
 		if strings.HasSuffix(src, "b.go") {
@@ -710,7 +764,9 @@ func B(y int) {
 
 	// Second run — b.go's shadow should be cleaned up.
 	e2 := NewEngine(dir)
-	e2.Run()
+	if err := e2.Run(); err != nil {
+		t.Fatal(err)
+	}
 
 	if _, err := os.Stat(shadowB); !os.IsNotExist(err) {
 		t.Errorf("stale shadow for deleted b.go should be removed, but still exists: %s", shadowB)
@@ -737,7 +793,9 @@ func Do(x int) {
 
 	// First run.
 	e1 := NewEngine(dir)
-	e1.Run()
+	if err := e1.Run(); err != nil {
+		t.Fatal(err)
+	}
 	var oldShadow string
 	for _, sp := range e1.Overlay.Replace {
 		oldShadow = sp
@@ -754,7 +812,9 @@ func Do(x int) {
 
 	// Second run.
 	e2 := NewEngine(dir)
-	e2.Run()
+	if err := e2.Run(); err != nil {
+		t.Fatal(err)
+	}
 	var newShadow string
 	for _, sp := range e2.Overlay.Replace {
 		newShadow = sp
@@ -806,7 +866,9 @@ func Do(x int) {
 	})
 
 	e := NewEngine(dir)
-	e.Run()
+	if err := e.Run(); err != nil {
+		t.Fatal(err)
+	}
 
 	// Manifest should exist.
 	mPath := e.manifestPath()
