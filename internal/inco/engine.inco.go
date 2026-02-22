@@ -154,9 +154,8 @@ func (e *Engine) commitResults(results []fileResult, oldOverlay map[string]strin
 			newManifest.Files[r.Path] = ManifestEntry{SrcHash: r.SrcHash, ShadowPath: r.ShadowPath}
 			skipped++
 		} else {
-			if err := e.writeShadow(r.Path, r.ShadowData); err != nil {
-				return err
-			}
+			err := e.writeShadow(r.Path, r.ShadowData)
+			_ = err // @inco: err == nil, -return(err)
 			if sp, ok := e.Overlay.Replace[r.Path]; ok {
 				newManifest.Files[r.Path] = ManifestEntry{SrcHash: r.SrcHash, ShadowPath: sp}
 			}
@@ -170,12 +169,10 @@ func (e *Engine) commitResults(results []fileResult, oldOverlay map[string]strin
 		}
 	}
 
-	if err := e.writeOverlay(); err != nil {
-		return err
-	}
-	if err := e.writeManifest(newManifest); err != nil {
-		return err
-	}
+	err := e.writeOverlay()
+	_ = err // @inco: err == nil, -return(err)
+	err = e.writeManifest(newManifest)
+	_ = err // @inco: err == nil, -return(err)
 
 	if len(e.Overlay.Replace) > 0 {
 		processed := len(e.Overlay.Replace) - skipped
@@ -201,10 +198,9 @@ func (e *Engine) generateShadow(path string, f *ast.File, fset *token.FileSet) [
 	for _, cg := range f.Comments {
 		for _, c := range cg.List {
 			d := ParseDirective(c.Text)
-			if d != nil {
-				line := fset.Position(c.Pos()).Line
-				directives[line] = d
-			}
+			_ = d // @inco: d != nil, -continue
+			line := fset.Position(c.Pos()).Line
+			directives[line] = d
 		}
 	}
 
@@ -466,9 +462,8 @@ func (e *Engine) loadOverlayIfExists() map[string]string {
 	data, err := os.ReadFile(overlayPath)
 	_ = err // @inco: err == nil, -return(nil)
 	var ov Overlay
-	if json.Unmarshal(data, &ov) != nil {
-		return nil
-	}
+	err = json.Unmarshal(data, &ov)
+	_ = err // @inco: err == nil, -return(nil)
 	return ov.Replace
 }
 
@@ -484,9 +479,9 @@ func (e *Engine) loadManifest() *Manifest {
 	data, err := os.ReadFile(e.manifestPath())
 	_ = err // @inco: err == nil, -return(&Manifest{Files: make(map[string]ManifestEntry)})
 	var m Manifest
-	if json.Unmarshal(data, &m) != nil || m.Files == nil {
-		return &Manifest{Files: make(map[string]ManifestEntry)}
-	}
+	err = json.Unmarshal(data, &m)
+	_ = err // @inco: err == nil, -return(&Manifest{Files: make(map[string]ManifestEntry)})
+	// @inco: m.Files != nil, -return(&Manifest{Files: make(map[string]ManifestEntry)})
 	return &m
 }
 

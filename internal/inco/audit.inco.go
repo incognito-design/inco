@@ -163,27 +163,25 @@ func auditFile(fset *token.FileSet, root, path string) FileAudit {
 	ast.Inspect(f, func(n ast.Node) bool {
 		switch fn := n.(type) {
 		case *ast.FuncDecl:
-			if fn.Body != nil {
-				name := fn.Name.Name
-				if fn.Recv != nil && len(fn.Recv.List) > 0 {
-					name = recvTypeName(fn.Recv.List[0].Type) + "." + name
-				}
-				funcRanges = append(funcRanges, funcRange{
-					name:  name,
-					line:  fset.Position(fn.Pos()).Line,
-					start: fn.Body.Pos(),
-					end:   fn.Body.End(),
-				})
+			// @inco: fn.Body != nil, -return(true)
+			name := fn.Name.Name
+			if fn.Recv != nil && len(fn.Recv.List) > 0 {
+				name = recvTypeName(fn.Recv.List[0].Type) + "." + name
 			}
+			funcRanges = append(funcRanges, funcRange{
+				name:  name,
+				line:  fset.Position(fn.Pos()).Line,
+				start: fn.Body.Pos(),
+				end:   fn.Body.End(),
+			})
 		case *ast.FuncLit:
-			if fn.Body != nil {
-				funcRanges = append(funcRanges, funcRange{
-					name:  "func literal",
-					line:  fset.Position(fn.Pos()).Line,
-					start: fn.Body.Pos(),
-					end:   fn.Body.End(),
-				})
-			}
+			// @inco: fn.Body != nil, -return(true)
+			funcRanges = append(funcRanges, funcRange{
+				name:  "func literal",
+				line:  fset.Position(fn.Pos()).Line,
+				start: fn.Body.Pos(),
+				end:   fn.Body.End(),
+			})
 		}
 		return true
 	})
